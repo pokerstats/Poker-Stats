@@ -8,17 +8,6 @@
   <div class="row">
     <div class="offset-md-1 col-md-10">
 
-      <h2>Tournament Groups</h2>
-      <hr>
-      <div class="tournament-list-group">
-        {% if tournament_groups %}
-          {% include 'tournament_group/snippets/tournament_groups_list_snippet.html' with tournament_groups=tournament_groups %}
-        {% endif %}
-        <div class="d-flex flex-row mt-3">
-           <a class="btn btn-info action-button" href="{% url 'tournament_group:create' %}">Create Tournament Group</a>
-        </div>
-      </div>
-
       <!-- Tournament invites -->
       {% if invites %}
       <h2>Tournament invites</h2>

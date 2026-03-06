@@ -20,6 +20,18 @@ from tournament_group.util import (
 from user.models import User
 
 @login_required
+def tournament_group_list_view(request, *args, **kwargs):
+	context = {}
+	try:
+		tournament_groups = TournamentGroup.objects.get_tournament_groups(
+			user_id=request.user.id
+		)
+		context['tournament_groups'] = tournament_groups
+	except Exception as e:
+		messages.error(request, e.args[0])
+	return render(request=request, template_name='tournament_group/tournament_group_list.html', context=context)
+
+@login_required
 def tournament_group_create_view(request, *args, **kwargs):
 	context = {}
 	try:

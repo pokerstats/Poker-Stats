@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block head_title %}Tournament Groups{% endblock %}
+
+{% block content %}
+
+<div class="container">
+  <div class="row">
+    <div class="offset-md-1 col-md-10">
+
+      <h2>Tournament Groups</h2>
+      <hr>
+      <div class="tournament-list-group">
+        {% if tournament_groups %}
+          {% include 'tournament_group/snippets/tournament_groups_list_snippet.html' with tournament_groups=tournament_groups %}
+        {% endif %}
+        <div class="d-flex flex-row mt-3">
+          <a class="btn btn-info action-button" href="{% url 'tournament_group:create' %}">Create Tournament Group</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style type="text/css">
+  hr {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
+  @media only screen and (max-width: 500px) {
+    .tournament-list-group {
+      margin-bottom: 28px;
+      font-size: 12px;
+    }
+
+    .action-button {
+      font-size: 13px;
+    }
+  }
+
+  @media only screen and (min-width: 501px) {
+    .tournament-list-group {
+      padding-left: 16px;
+      padding-right: 16px;
+      margin-bottom: 28px;
+      font-size: 16px;
+    }
+  }
+</style>
+
+{% endblock content %}

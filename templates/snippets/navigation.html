@@ -1,28 +1,109 @@
-<nav class="navbar navbar-expand-lg bg-light">
+<nav class="navbar bg-light">
   <div class="container-fluid">
-    <a class="navbar-brand" href="{% url 'home' %}">PokerStats</a>
     {% if request.user.is_authenticated %}
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarText" aria-controls="navbarText" aria-expanded="false" aria-label="Toggle navigation">
+    <button class="navbar-toggler" type="button"
+            data-bs-toggle="offcanvas" data-bs-target="#navOffcanvas"
+            aria-controls="navOffcanvas" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
-    <div class="collapse navbar-collapse" id="navbarText">
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'tournament:tournament_list' %}">Tournaments</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'user:profile' pk=request.user.pk %}">Profile</a>
-        </li>
-        {% if request.user.is_staff %}
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'invite:manage' %}">Invites</a>
-        </li>
-        {% endif %}
-      </ul>
-      <span class="navbar-text">
-        <a class="nav-link" href="{% url 'account_logout' %}">logout</a>
-      </span>
-    </div>
     {% endif %}
   </div>
 </nav>
+
+{% if request.user.is_authenticated %}
+<div class="offcanvas offcanvas-start" tabindex="-1" id="navOffcanvas" aria-labelledby="navOffcanvasLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="navOffcanvasLabel">PokerStats</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'tournament:tournament_list' %}">Tournaments</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'user:profile' pk=request.user.pk %}">Profile</a>
+      </li>
+      {% if request.user.is_staff %}
+      <li class="nav-item">
+        <a class="nav-link" href="{% url 'invite:manage' %}">Invites</a>
+      </li>
+      {% endif %}
+    </ul>
+    <hr>
+    <a class="nav-link" href="{% url 'account_logout' %}">Logout</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  const el = document.getElementById('navOffcanvas');
+  if (!el) return;
+
+  let startX = 0;
+  let delta = 0;
+  let dragging = false;
+
+  function getClientX(e) {
+    return e.touches ? e.touches[0].clientX : e.clientX;
+  }
+
+  function onStart(e) {
+    startX = getClientX(e);
+    delta = 0;
+    dragging = true;
+    el.style.transition = 'none';
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    delta = getClientX(e) - startX;
+    if (delta > 0) delta = 0; // left-only drag
+    el.style.transform = `translateX(${delta}px)`;
+  }
+
+  function onEnd() {
+    if (!dragging) return;
+    dragging = false;
+    const threshold = el.offsetWidth * 0.4;
+
+    if (delta < -threshold) {
+      // animate out then dismiss
+      el.style.transition = 'transform 0.2s ease';
+      el.style.transform = `translateX(-${el.offsetWidth}px)`;
+      el.addEventListener('transitionend', function cleanup() {
+        el.removeEventListener('transitionend', cleanup);
+        el.style.transition = '';
+        el.style.transform = '';
+        const instance = bootstrap.Offcanvas.getInstance(el);
+        if (instance) instance.hide();
+      });
+    } else {
+      // snap back
+      el.style.transition = 'transform 0.2s ease';
+      el.style.transform = '';
+      el.addEventListener('transitionend', function cleanup() {
+        el.removeEventListener('transitionend', cleanup);
+        el.style.transition = '';
+      });
+    }
+
+    delta = 0;
+  }
+
+  // reset transform when Bootstrap opens the panel
+  el.addEventListener('show.bs.offcanvas', () => {
+    el.style.transition = '';
+    el.style.transform = '';
+  });
+
+  el.addEventListener('touchstart', onStart, { passive: true });
+  el.addEventListener('touchmove', onMove, { passive: true });
+  el.addEventListener('touchend', onEnd);
+
+  el.addEventListener('mousedown', onStart);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onEnd);
+})();
+</script>
+{% endif %}

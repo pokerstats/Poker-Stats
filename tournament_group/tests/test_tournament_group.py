@@ -7,7 +7,8 @@ from tournament.models import (
 from tournament.test_util import (
 	build_tournament,
 	build_structure,
-	add_players_to_tournament
+	add_players_to_tournament,
+	eliminate_players_and_complete_tournament
 )
 
 from tournament_group.models import TournamentGroup
@@ -35,303 +36,6 @@ class TournamentGroupTestCase(TransactionTestCase):
 			title = title
 		)
 		return group
-
-	"""
-	Create a new TournamentGroup and confirm the admin is added as a User.
-	"""
-	def test_create_tournament_group_admin_is_added_as_user(self):
-		cat = User.objects.get_by_username("cat")
-		title = "Cat's tournament group"
-		group = self.create_tournament_group(
-			admin = cat,
-			title = title
-		)
-
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-
-		self.assertEqual(len(groups), 1)
-		self.assertEqual(groups[0].title, title)
-		self.assertEqual(groups[0].admin, cat)
-		self.assertEqual(len(groups[0].get_users()), 1)
-		self.assertEqual(groups[0].get_users()[0], cat)
-
-	"""
-	Add a user to a TournamentGroup and validate all the logic in add_users_to_group.
-	"""
-	def test_add_users_to_group(self):
-		cat = User.objects.get_by_username("cat")
-		title = "Cat's tournament group"
-		group = self.create_tournament_group(
-			admin = cat,
-			title = title
-		)
-
-		# Verify you cannot add users to a group if you are not admin
-		dog = User.objects.get_by_username("dog")
-		with self.assertRaisesMessage(ValidationError, "You're not the admin of that TournamentGroup."):
-			TournamentGroup.objects.add_users_to_group(
-				admin = dog,
-				group = group,
-				users = User.objects.all().exclude(username="cat")
-			)
-
-		# Verify you can't add the same user more than once.
-		dog = User.objects.get_by_username("dog")
-		with self.assertRaisesMessage(ValidationError, "There is a duplicate in the list of users you're trying to add to this TournamentGroup."):
-			TournamentGroup.objects.add_users_to_group(
-				admin = cat,
-				group = group,
-				users = [dog, dog]
-			)
-
-		# Add dog
-		TournamentGroup.objects.add_users_to_group(
-			admin = cat,
-			group = group,
-			users = [dog]
-		)
-
-		# Verify dog was added to the Group
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-		self.assertEqual(groups[0].get_users()[0], cat)
-		self.assertEqual(groups[0].get_users()[1], dog)
-
-		# Verify you can't add dog again.
-		with self.assertRaisesMessage(ValidationError, f"{dog.username} is already in this TournamentGroup."):
-			TournamentGroup.objects.add_users_to_group(
-				admin = cat,
-				group = group,
-				users = [dog]
-			)
-
-	"""
-	Remove a user to a TournamentGroup and validate all the logic in remove_user_from_group.
-	"""
-	def test_remove_user_from_group(self):
-		cat = User.objects.get_by_username("cat")
-		title = "Cat's tournament group"
-		cats_group = self.create_tournament_group(
-			admin = cat,
-			title = title
-		)
-		# Add cats tournament to the group
-		structure = build_structure(
-			admin = cat, # Cat is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-
-		tournament = build_tournament(structure, admin_user=cat)
-
-		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
-		tournament = Tournament.objects.complete_tournament(
-						user = cat,
-						tournament_id = tournament.id
-					)
-
-		TournamentGroup.objects.add_tournaments_to_group(
-			admin = cat,
-			group = cats_group,
-			tournaments = [tournament]
-		)
-
-		# Add dog
-		dog = User.objects.get_by_username("dog")
-		TournamentGroup.objects.add_users_to_group(
-			admin = cat,
-			group = cats_group,
-			users = [dog]
-		)
-
-		# Verify dog was added to the Group
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-		self.assertEqual(groups[0].get_users()[0], cat)
-		self.assertEqual(groups[0].get_users()[1], dog)
-
-		# Verify you cannot remove users from a group if you are not admin
-		with self.assertRaisesMessage(ValidationError, "You're not the admin of that TournamentGroup."):
-			TournamentGroup.objects.remove_user_from_group(
-				admin = dog,
-				group = cats_group,
-				user = cat
-			)
-
-		# Verify you cannot remove a user who is not in the group.
-		bird = User.objects.get_by_username("bird")
-		with self.assertRaisesMessage(ValidationError, f"{bird.username} is not in this TournamentGroup."):
-			TournamentGroup.objects.remove_user_from_group(
-				admin = cat,
-				group = cats_group,
-				user = bird
-			)
-
-		# Add a tournament to the group that only dog participated in
-		structure = build_structure(
-			admin = dog, # Dog is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-		tournament = build_tournament(structure = structure, admin_user = dog)
-
-		Tournament.objects.start_tournament(user = dog, tournament_id = tournament.id)
-		tournament = Tournament.objects.complete_tournament(
-						user = dog,
-						tournament_id = tournament.id
-					)
-
-		TournamentGroup.objects.add_tournaments_to_group(
-			admin = cat,
-			group = cats_group,
-			tournaments = [tournament]
-		)
-
-		# Verify there are two tournaments in the group
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-		self.assertEqual(len(groups[0].get_tournaments()), 2)
-		self.assertEqual(groups[0].get_tournaments()[1].admin, cat)
-		self.assertEqual(groups[0].get_tournaments()[0].admin, dog)
-
-		# Now remove dog from the group. This should also remove dogs tournament since cat did not play in it.
-		TournamentGroup.objects.remove_user_from_group(
-				admin = cat,
-				group = groups[0],
-				user = dog
-			)
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-		self.assertEqual(len(groups[0].get_tournaments()), 1)
-		self.assertEqual(groups[0].get_tournaments()[0].admin, cat)
-
-	"""
-	Validate the logic in find_tournaments_that_only_specific_user_has_played.
-	"""
-	def test_find_tournaments_that_only_specific_user_has_played(self):
-		cat = User.objects.get_by_username("cat")
-		title = "Cat's tournament group"
-		cats_group = self.create_tournament_group(
-			admin = cat,
-			title = title
-		)
-		# Add cats tournament to the group
-		structure = build_structure(
-			admin = cat, # Cat is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-
-		tournament = build_tournament(structure, admin_user=cat)
-
-		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
-		tournament = Tournament.objects.complete_tournament(
-						user = cat,
-						tournament_id = tournament.id
-					)
-
-		TournamentGroup.objects.add_tournaments_to_group(
-			admin = cat,
-			group = cats_group,
-			tournaments = [tournament]
-		)
-
-		# Add dog
-		dog = User.objects.get_by_username("dog")
-		TournamentGroup.objects.add_users_to_group(
-			admin = cat,
-			group = cats_group,
-			users = [dog]
-		)
-
-		# Add a tournament to the group that only dog participated in
-		structure = build_structure(
-			admin = dog, # Dog is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-		tournament = build_tournament(structure = structure, admin_user = dog)
-
-		Tournament.objects.start_tournament(user = dog, tournament_id = tournament.id)
-		tournament = Tournament.objects.complete_tournament(
-						user = dog,
-						tournament_id = tournament.id
-					)
-
-		TournamentGroup.objects.add_tournaments_to_group(
-			admin = cat,
-			group = cats_group,
-			tournaments = [tournament]
-		)
-
-		# Add bird
-		bird = User.objects.get_by_username("bird")
-		TournamentGroup.objects.add_users_to_group(
-			admin = cat,
-			group = cats_group,
-			users = [bird]
-		)
-
-		# Add a tournament to the group that only bird participated in
-		structure = build_structure(
-			admin = bird, # bird is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-		tournament = build_tournament(structure = structure, admin_user = bird)
-
-		Tournament.objects.start_tournament(user = bird, tournament_id = tournament.id)
-		tournament = Tournament.objects.complete_tournament(
-						user = bird,
-						tournament_id = tournament.id
-					)
-
-		TournamentGroup.objects.add_tournaments_to_group(
-			admin = cat,
-			group = cats_group,
-			tournaments = [tournament]
-		)
-
-		# Verify there are three tournaments in the group
-		groups = TournamentGroup.objects.get_tournament_groups(user_id = cat.id)
-		self.assertEqual(len(groups[0].get_tournaments()), 3)
-		self.assertEqual(groups[0].get_tournaments()[2].admin, cat)
-		self.assertEqual(groups[0].get_tournaments()[1].admin, dog)
-		self.assertEqual(groups[0].get_tournaments()[0].admin, bird)
-
-		# Find the tournaments in the group that only cat participated in.
-		cats_groups = TournamentGroup.objects.get_tournament_groups(
-			user_id = cat.id
-		)
-		tournaments = TournamentGroup.objects.find_tournaments_that_only_this_user_has_played(
-			group = cats_groups[0],
-			user = cat
-		)
-		self.assertEqual(len(tournaments), 1)
-		self.assertEqual(tournaments[0].admin, cat)
-
-		# Find the tournaments in the group that only dog participated in.
-		tournaments = TournamentGroup.objects.find_tournaments_that_only_this_user_has_played(
-			group = cats_groups[0],
-			user = dog
-		)
-		self.assertEqual(len(tournaments), 1)
-		self.assertEqual(tournaments[0].admin, dog)
-
-		# Find the tournaments in the group that only bird participated in.
-		tournaments = TournamentGroup.objects.find_tournaments_that_only_this_user_has_played(
-			group = cats_groups[0],
-			user = bird
-		)
-		self.assertEqual(len(tournaments), 1)
-		self.assertEqual(tournaments[0].admin, bird)
-
 
 	"""
 	Test the logic in test_add_tournaments_to_group.
@@ -397,23 +101,6 @@ class TournamentGroupTestCase(TransactionTestCase):
 				tournaments = [tournament]
 			)
 
-		# Verify you cannot add a Tournament to the Group that none of the users in the group have played in.
-		structure = build_structure(
-			admin = dog, # Dog is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = True
-		)
-		tournament = build_tournament(structure = structure, admin_user = dog)
-		with self.assertRaisesMessage(ValidationError, f"None of the users in this TournamentGroup have played in {tournament.title}."):
-			TournamentGroup.objects.add_tournaments_to_group(
-				admin = cat,
-				group = cats_group,
-				tournaments = [tournament]
-			)
-
-	
 	"""
 	Test the logic in remove_tournament_from_group.
 	"""
@@ -491,33 +178,136 @@ class TournamentGroupTestCase(TransactionTestCase):
 			group = cats_group,
 			tournament = tournament
 		)
-		groups = TournamentGroup.objects.get_tournament_groups(user_id=cat.id)
-		self.assertEqual(len(groups), 1)
-		self.assertEqual(len(groups[0].get_tournaments()), 0)
+		group = TournamentGroup.objects.get_by_id(cats_group.id)
+		self.assertEqual(len(group.get_tournaments()), 0)
 
-		
+	"""
+	get_users() should return all distinct users who are players in any tournament in the group.
+	"""
+	def test_get_users_derives_from_tournament_players(self):
+		cat = User.objects.get_by_username("cat")
+		dog = User.objects.get_by_username("dog")
+		bird = User.objects.get_by_username("bird")
 
+		group = self.create_tournament_group(admin=cat, title="Test Group")
 
+		# Empty group — no users
+		self.assertEqual(len(group.get_users()), 0)
 
+		# Build a tournament with cat as admin (auto-added as player) and dog as additional player
+		structure = build_structure(
+			admin=cat,
+			buyin_amount=100,
+			bounty_amount=10,
+			payout_percentages=(60, 30, 10),
+			allow_rebuys=False
+		)
+		tournament = build_tournament(structure, admin_user=cat)
+		add_players_to_tournament([dog], tournament)
+		Tournament.objects.start_tournament(user=cat, tournament_id=tournament.id)
+		eliminate_players_and_complete_tournament(admin=cat, tournament=tournament)
+		tournament = Tournament.objects.get_by_id(tournament.id)
 
+		TournamentGroup.objects.add_tournaments_to_group(
+			admin=cat,
+			group=group,
+			tournaments=[tournament]
+		)
 
+		users = group.get_users()
+		self.assertEqual(len(users), 2)
+		self.assertIn(cat, users)
+		self.assertIn(dog, users)
+		self.assertNotIn(bird, users)
 
+	"""
+	A user who plays in multiple tournaments in the group should appear only once.
+	"""
+	def test_get_users_returns_distinct_users(self):
+		cat = User.objects.get_by_username("cat")
+		dog = User.objects.get_by_username("dog")
 
+		group = self.create_tournament_group(admin=cat, title="Test Group")
 
+		structure = build_structure(
+			admin=cat,
+			buyin_amount=100,
+			bounty_amount=10,
+			payout_percentages=(60, 30, 10),
+			allow_rebuys=False
+		)
 
+		# Two tournaments both with cat and dog as players
+		t1 = build_tournament(structure, admin_user=cat)
+		add_players_to_tournament([dog], t1)
+		Tournament.objects.start_tournament(user=cat, tournament_id=t1.id)
+		eliminate_players_and_complete_tournament(admin=cat, tournament=t1)
+		t1 = Tournament.objects.get_by_id(t1.id)
 
+		t2 = build_tournament(structure, admin_user=cat)
+		add_players_to_tournament([dog], t2)
+		Tournament.objects.start_tournament(user=cat, tournament_id=t2.id)
+		eliminate_players_and_complete_tournament(admin=cat, tournament=t2)
+		t2 = Tournament.objects.get_by_id(t2.id)
 
+		TournamentGroup.objects.add_tournaments_to_group(
+			admin=cat, group=group, tournaments=[t1, t2]
+		)
 
+		users = group.get_users()
+		self.assertEqual(len(users), 2)
 
+	"""
+	get_tournament_groups should return groups where the user played in at least one tournament.
+	"""
+	def test_get_tournament_groups_returns_groups_user_played_in(self):
+		cat = User.objects.get_by_username("cat")
+		dog = User.objects.get_by_username("dog")
+		bird = User.objects.get_by_username("bird")
 
+		cats_group = self.create_tournament_group(admin=cat, title="Cat's Group")
+		dogs_group = self.create_tournament_group(admin=dog, title="Dog's Group")
 
+		# Cat plays in a tournament added to cat's group
+		structure = build_structure(
+			admin=cat,
+			buyin_amount=100,
+			bounty_amount=10,
+			payout_percentages=(60, 30, 10),
+			allow_rebuys=False
+		)
+		cat_tournament = build_tournament(structure, admin_user=cat)
+		Tournament.objects.start_tournament(user=cat, tournament_id=cat_tournament.id)
+		cat_tournament = Tournament.objects.complete_tournament(user=cat, tournament_id=cat_tournament.id)
+		TournamentGroup.objects.add_tournaments_to_group(
+			admin=cat, group=cats_group, tournaments=[cat_tournament]
+		)
 
+		# Dog plays in a tournament added to dog's group
+		structure2 = build_structure(
+			admin=dog,
+			buyin_amount=100,
+			bounty_amount=10,
+			payout_percentages=(60, 30, 10),
+			allow_rebuys=False
+		)
+		dog_tournament = build_tournament(structure2, admin_user=dog)
+		Tournament.objects.start_tournament(user=dog, tournament_id=dog_tournament.id)
+		dog_tournament = Tournament.objects.complete_tournament(user=dog, tournament_id=dog_tournament.id)
+		TournamentGroup.objects.add_tournaments_to_group(
+			admin=dog, group=dogs_group, tournaments=[dog_tournament]
+		)
 
+		# cat should see only cat's group
+		cat_groups = TournamentGroup.objects.get_tournament_groups(user_id=cat.id)
+		self.assertEqual(len(cat_groups), 1)
+		self.assertEqual(cat_groups[0], cats_group)
 
+		# dog should see only dog's group
+		dog_groups = TournamentGroup.objects.get_tournament_groups(user_id=dog.id)
+		self.assertEqual(len(dog_groups), 1)
+		self.assertEqual(dog_groups[0], dogs_group)
 
-
-
-
-
-
-
+		# bird has no tournaments anywhere — sees nothing
+		bird_groups = TournamentGroup.objects.get_tournament_groups(user_id=bird.id)
+		self.assertEqual(len(bird_groups), 0)

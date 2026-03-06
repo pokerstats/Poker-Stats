@@ -84,26 +84,6 @@
       </div>
 
 
-      <!-- Users -->
-      <h5>Users</h5>
-      <hr>
-      <div class="tournament-group-section-container">
-
-        <!-- Display the users who have already been added -->
-        {% if current_users %}
-          {% include 'tournament_group/snippets/display_user_list_snippet_edit_mode.html' with users=current_users %}
-        {% endif %}
-
-        <!-- Adding new users -->
-        {% if request.user == tournament_group.admin %}
-          <div class="add-new-container">
-            <h6>Add New User</h6>
-            <input hx-get="{% url 'tournament_group:update' pk=tournament_group.id %}" hx-target="#body_container" hx-swap="innerHTML" hx-trigger="input delay:0.3s" type="text" name="search" id="id_search" class="form-control mt-3" placeholder="Add players" aria-label="Add users" value="{{search}}">
-            {% include 'tournament_group/snippets/user_search_results.html' with users=search_result_users %}
-          </div>
-        {% endif %}
-      </div>
-
       <!-- Tournaments -->
       <h5>Tournaments</h5>
       <hr>

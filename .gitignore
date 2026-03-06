@@ -9,3 +9,8 @@ db.sqlite3
 notes.md
 static_cdn
 media_cdn
+
+# Virtual environment
+Lib/
+Scripts/
+pyvenv.cfg

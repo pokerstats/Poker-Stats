@@ -22,6 +22,7 @@ urlpatterns = [
     path('user/', include("user.urls"), name="user"),
     path('tournament_analytics/', include("tournament_analytics.urls"), name="tournament_analytics"),
     path('tournament_group/', include("tournament_group.urls"), name="tournament_group"),
+    path('invite/', include("invite.urls")),
 ]
 
 if settings.DEBUG:

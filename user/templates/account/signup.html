@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
 {% load i18n %}
-{% load account socialaccount %}
+{% load account %}
 
-{% block head_title %}{% trans "Signup" %}{% endblock %}
+{% block head_title %}{% trans "Email Sign Up" %}{% endblock %}
 
 {% block content %}
 
@@ -12,17 +12,9 @@
 <div class="container">
   <div class="row">
     <div class="offset-lg-3 col-lg-6">
-      <h1>{% trans "Sign Up" %}</h1>
+      <h1>{% trans "Email Sign Up" %}</h1>
 
       <p>{% blocktrans %}Already have an account? Then please <a href="{{ login_url }}">sign in</a>.{% endblocktrans %}</p>
-
-      {% get_providers as socialaccount_providers %}
-
-      {% if socialaccount_providers %}
-      <div class="socialaccount_ballot mb-3">
-        {% include "socialaccount/snippets/provider_list.html" with process="login" %}
-      </div>
-      {% endif %}
 
       <form class="signup" id="signup_form" method="post" action="{% url 'account_signup' %}">
         {% csrf_token %}

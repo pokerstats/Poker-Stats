@@ -13,7 +13,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:14
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -25,19 +25,19 @@ jobs:
     strategy:
       max-parallel: 4
       matrix:
-        python-version: [3.9]
+        python-version: ['3.10']
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    - name: Run Tests'
+    - name: Run Tests
       env:
         SECRET_KEY: 69tgugtg%^fgJO&*&
         DB_NAME: github_actions
@@ -63,3 +63,4 @@ jobs:
         python manage.py test tournament/
         python manage.py test tournament_analytics/tests
         python manage.py test tournament_group/tests
+        python manage.py test invite/

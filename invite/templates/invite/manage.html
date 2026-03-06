@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block head_title %}Invite Management{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-lg-10 offset-lg-1">
+      <h1>Invite Management</h1>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      <form method="POST" class="mb-4">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Generate Invite Link</button>
+      </form>
+
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Token</th>
+            <th>Created By</th>
+            <th>Expires</th>
+            <th>Used By</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for invite in invites %}
+          <tr>
+            <td><code>{{ invite.token|truncatechars:16 }}</code></td>
+            <td>{{ invite.created_by }}</td>
+            <td>{{ invite.expires_at|date:"M d, Y H:i" }}</td>
+            <td>{{ invite.used_by|default:"—" }}</td>
+            <td>
+              {% if invite.used_by %}
+                <span class="badge bg-secondary">Used</span>
+              {% elif invite.is_valid %}
+                <span class="badge bg-success">Active</span>
+              {% else %}
+                <span class="badge bg-danger">Expired</span>
+              {% endif %}
+            </td>
+            <td class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-secondary copy-btn"
+                      data-url="{{ request.scheme }}://{{ request.get_host }}{% url 'invite:accept' token=invite.token %}">
+                Copy Link
+              </button>
+              <form method="POST" action="{% url 'invite:delete' token=invite.token %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-muted">No invites yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      navigator.clipboard.writeText(btn.dataset.url).then(function() {
+        var original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = original; }, 2000);
+      });
+    });
+  });
+</script>
+{% endblock %}

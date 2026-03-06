@@ -41,6 +41,7 @@ ALLOWED_HOSTS = ['pokerstats.lol', 'www.pokerstats.lol', '67.205.147.15', 'local
 INSTALLED_APPS = [
     # My apps
     'root',
+    'invite',
     'tournament',
     'tournament_analytics',
     'tournament_group',
@@ -163,6 +164,9 @@ LOGIN_REDIRECT_URL = 'home'
 ACCOUNT_EMAIL_SUBJECT_PREFIX = '(pokerstats.lol) '
 
 SITE_ID = 1
+
+ACCOUNT_ADAPTER = 'invite.adapters.InviteAccountAdapter'
+SOCIALACCOUNT_ADAPTER = 'invite.adapters.InviteSocialAccountAdapter'
 
 
 # Password validation

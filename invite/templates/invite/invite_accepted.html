@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load socialaccount %}
+
+{% block head_title %}You're Invited{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+  <div class="row">
+    <div class="offset-lg-3 col-lg-6 text-center">
+      <h1>You're Invited!</h1>
+      <p class="lead">Your invite link is valid. Create your account to get started.</p>
+
+      {% get_providers as socialaccount_providers %}
+      {% if socialaccount_providers %}
+      <div class="mb-3">
+        {% include "socialaccount/snippets/provider_list.html" with process="signup" %}
+      </div>
+      <p class="text-muted">— or sign up with email —</p>
+      {% endif %}
+
+      <a href="{% url 'account_signup' %}" class="btn btn-primary">Sign Up with Email</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

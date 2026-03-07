@@ -69,8 +69,19 @@
         {% if request.user == tournament.admin and tournament.get_state_string == "INACTIVE" %}
           <div id="id_send_invite_container" class="mt-4">
             <h6>Add Players</h6>
-            <input hx-get="{% url 'tournament:tournament_view' pk=tournament.id %}" hx-target="#body_container" hx-swap="innerHTML" hx-trigger="input delay:0.3s" type="text" name="search" id="id_search" class="form-control mt-3" placeholder="Add players" aria-label="Add players" value="{{search}}">
-            {% include 'tournament/snippets/user_search_results.html' %}
+            <div style="position: relative;">
+              <input hx-get="{% url 'tournament:search_players' pk=tournament.id %}"
+                     hx-target="#id-user-search-results"
+                     hx-swap="innerHTML"
+                     hx-trigger="input delay:300ms"
+                     type="text"
+                     name="search"
+                     id="id_search"
+                     class="form-control mt-3"
+                     placeholder="Add players"
+                     aria-label="Add players">
+              {% include 'tournament/snippets/user_search_results.html' %}
+            </div>
           </div>
         {% endif %}
       </div>

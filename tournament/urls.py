@@ -7,6 +7,7 @@ from tournament.views import (
     get_tournament_structure,
     rebuy_player_in_tournament,
     remove_player_from_tournament,
+    search_tournament_players,
     split_eliminate_player_from_tournament,
     start_tournament,
     tournament_admin_view,
@@ -38,6 +39,7 @@ urlpatterns = [
     path('tournament_edit/<int:pk>/', tournament_edit_view, name="tournament_edit"),
     path('tournament_list/', tournament_list_view, name="tournament_list"),
     path('tournament_view/<int:pk>/', tournament_view, name="tournament_view"),
+    path('search_players/<int:pk>/', search_tournament_players, name="search_players"),
     path('undo_complete/<int:pk>/', undo_completed_at, name="undo_complete"),
     path('undo_started/<int:pk>/', undo_started_at, name="undo_started"),
 ]

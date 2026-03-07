@@ -325,6 +325,25 @@ def rebuy_player_in_tournament(request, *args, **kwargs):
 		return HttpResponse(content_type='application/json', status=400)
 	return HttpResponse(content_type='application/json', status=200)
 
+@login_required
+def search_tournament_players(request, *args, **kwargs):
+	context = {}
+	try:
+		tournament_id = kwargs['pk']
+		tournament = Tournament.objects.get_by_id(tournament_id)
+		context['tournament'] = tournament
+		search = request.GET.get("search", "").strip()
+		if search:
+			players = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament_id)
+			users = User.objects.all().filter(username__icontains=search)
+			users = users.exclude(email__iexact=request.user.email)
+			for player in players:
+				users = users.exclude(email__iexact=player.user.email)
+			context['users'] = users
+	except Exception as e:
+		messages.error(request, e.args[0])
+	return render(request=request, template_name='tournament/snippets/user_search_results.html', context=context)
+
 """
 Common function shared between tournament_view and htmx requests used in that view.
 """

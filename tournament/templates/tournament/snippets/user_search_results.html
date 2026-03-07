@@ -5,7 +5,7 @@
       <div class="user-list-item d-flex justify-content-between list-group-item list-group-item-action">
         <span class="username">{{user.username}}</span>
         {% if request.user == tournament.admin %}
-        <a hx-post="{% url 'tournament:invite_player' player_id=user.id tournament_id=tournament.id %}" hx-target="#body_container" hx-swap="innerHTML" class="btn btn-primary btn-sm">Invite</a>
+        <a hx-post="{% url 'tournament:add_player' player_id=user.id tournament_id=tournament.id %}" hx-target="#body_container" hx-swap="innerHTML" class="btn btn-primary btn-sm">Add</a>
         {% endif %}
       </div>
     {% endfor %}

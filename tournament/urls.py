@@ -1,11 +1,10 @@
 from django.urls import include, path
 
 from tournament.views import (
+    add_player_to_tournament,
     complete_tournament,
     eliminate_player_from_tournament,
-    invite_player_to_tournament,
     get_tournament_structure,
-    join_tournament,
     rebuy_player_in_tournament,
     remove_player_from_tournament,
     split_eliminate_player_from_tournament,
@@ -19,19 +18,17 @@ from tournament.views import (
     tournament_view,
     undo_completed_at,
     undo_started_at,
-    uninvite_player_from_tournament,
 )
 
 app_name = 'tournament'
 
 urlpatterns = [
+    path('add_player/<int:player_id>/<int:tournament_id>/', add_player_to_tournament, name="add_player"),
     path('complete/<int:pk>/', complete_tournament, name="complete"),
     path('create_tournament/', tournament_create_view, name="create_tournament"),
     path('create_tournament_structure/', tournament_structure_create_view, name="create_tournament_structure"),
     path('eliminate_player/<int:tournament_id>/<int:eliminator_id>/<int:eliminatee_id>/', eliminate_player_from_tournament, name="eliminate_player"),
-    path('invite_player_to_tournament/<int:player_id>/<int:tournament_id>/', invite_player_to_tournament, name="invite_player"),
     path('get_tournament_structure/', get_tournament_structure, name="get_tournament_structure"),
-    path('join_tournament/<int:pk>/', join_tournament, name="join_tournament"),
     path('player_rebuy/<int:player_id>/<int:tournament_id>/', rebuy_player_in_tournament, name="player_rebuy"),
     path('remove_player/<int:user_id>/<int:tournament_id>/', remove_player_from_tournament, name="remove_player"),
     path('split_eliminate_player/<int:tournament_id>/<str:eliminator_ids>/<int:eliminatee_id>/', split_eliminate_player_from_tournament, name="split_eliminate_player"),
@@ -43,7 +40,6 @@ urlpatterns = [
     path('tournament_view/<int:pk>/', tournament_view, name="tournament_view"),
     path('undo_complete/<int:pk>/', undo_completed_at, name="undo_complete"),
     path('undo_started/<int:pk>/', undo_started_at, name="undo_started"),
-    path('uninvite/<int:player_id>/<int:tournament_id>/', uninvite_player_from_tournament, name="uninvite"),
 ]
 
 

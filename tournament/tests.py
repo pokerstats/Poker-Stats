@@ -1017,24 +1017,25 @@ class TournamentTestCase(TestCase):
 
 
 		self.assertEqual(len(touraments2), 2)
+		t1 = touraments2.get(title="Cat Tournament")
+		t2 = touraments2.get(title="Cat Tournament 2")
+
 		# Verify Cat Tournament 2
-		self.assertEqual(touraments2[0].admin, cat)
-		self.assertEqual(touraments2[0].title, "Cat Tournament 2")
-		self.assertEqual(touraments2[0].tournament_structure.buyin_amount, 199)
-		self.assertEqual(touraments2[0].tournament_structure.bounty_amount, None)
-		self.assertEqual(touraments2[0].tournament_structure.payout_percentages, [60, 20, 15, 5])
-		self.assertEqual(touraments2[0].tournament_structure.allow_rebuys, True)
+		self.assertEqual(t2.admin, cat)
+		self.assertEqual(t2.tournament_structure.buyin_amount, 199)
+		self.assertEqual(t2.tournament_structure.bounty_amount, None)
+		self.assertEqual(t2.tournament_structure.payout_percentages, [60, 20, 15, 5])
+		self.assertEqual(t2.tournament_structure.allow_rebuys, True)
 
 		# Verify Cat Tournament 1 is the same as previous assertions
-		self.assertEqual(touraments2[1].admin, cat)
-		self.assertEqual(touraments2[1].title, "Cat Tournament")
-		self.assertEqual(touraments2[1].tournament_structure.buyin_amount, 100)
-		self.assertEqual(touraments2[1].tournament_structure.bounty_amount, 10)
-		self.assertEqual(touraments2[1].tournament_structure.payout_percentages, [100])
-		self.assertEqual(touraments2[1].tournament_structure.allow_rebuys, False)
+		self.assertEqual(t1.admin, cat)
+		self.assertEqual(t1.tournament_structure.buyin_amount, 100)
+		self.assertEqual(t1.tournament_structure.bounty_amount, 10)
+		self.assertEqual(t1.tournament_structure.payout_percentages, [100])
+		self.assertEqual(t1.tournament_structure.allow_rebuys, False)
 
 		# Verify the admin is added as a TournamentPlayer
-		players2 = TournamentPlayer.objects.get_tournament_players(touraments2[1].id)
+		players2 = TournamentPlayer.objects.get_tournament_players(t1.id)
 		self.assertEqual(len(players2), 1)
 		self.assertEqual(players2[0].user, cat)
 

@@ -103,8 +103,9 @@ class TournamentGroupManager(models.Manager):
 	"""
 	def get_tournament_groups(self, user_id):
 		user = User.objects.get_by_id(user_id)
+		from django.db.models import Q
 		return super().get_queryset().filter(
-			tournaments__tournamentplayer__user=user
+			Q(admin=user) | Q(tournaments__tournamentplayer__user=user)
 		).distinct()
 
 	"""

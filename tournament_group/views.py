@@ -25,7 +25,7 @@ def tournament_group_list_view(request, *args, **kwargs):
 	try:
 		tournament_groups = TournamentGroup.objects.get_tournament_groups(
 			user_id=request.user.id
-		)
+		).order_by("-start_at")
 		context['tournament_groups'] = tournament_groups
 	except Exception as e:
 		messages.error(request, e.args[0])

@@ -1,10 +1,9 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
-from django.test import TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from tournament.models import (
-	TournamentInvite,
 	TournamentPlayerResult,
 	TournamentStructure,
 	TournamentElimination,
@@ -35,10 +34,7 @@ from user.test_util import (
 )
 
 
-class TournamentTotalsTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentTotalsTestCase(TestCase):
 
 	def setUp(self):
 		# Build some users for the tests
@@ -54,7 +50,7 @@ class TournamentTotalsTestCase(TransactionTestCase):
 			allow_rebuys = True
 		)
 
-		tournament = build_tournament(structure)
+		self.tournament = build_tournament(structure)
 
 	def verify_result(self, user, num_tournaments, expected_eliminations_count, expected_rebuys_count):
 		# Get the results. We can use this to verify TournamentTotals.
@@ -122,7 +118,7 @@ class TournamentTotalsTestCase(TransactionTestCase):
 	"""
 	def test_build_tournament_totals_for_single_tournament(self):
 		# Tournament
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 
 		users = User.objects.all()
 		cat = User.objects.get_by_username("cat")
@@ -277,7 +273,7 @@ class TournamentTotalsTestCase(TransactionTestCase):
 	"""
 	def test_build_tournament_totals_for_two_tournaments(self):
 		# First Tournament
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 
 		users = User.objects.all()
 		cat = User.objects.get_by_username("cat")

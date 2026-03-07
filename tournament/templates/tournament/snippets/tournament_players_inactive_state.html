@@ -1,7 +1,5 @@
-{% load tournament_extras %}
-
 {% if tournament.get_state_string == "INACTIVE" %}
-{% if players or invites %}
+{% if players %}
 
 <div class="mt-3 players-container table-responsive" id="id_players_container">
   <table class="table">
@@ -19,7 +17,6 @@
   <tbody>
 
       {% for player in players %}
-      {% if player.id|has_player_joined_tournament:tournament.id == True %}
       <tr>
         <td scope="row" class="player-row">{{player.user.username}}</td>
         <td class="player-row">Joined</td>
@@ -33,24 +30,10 @@
           {% endif %}
         </td>
       </tr>
-      {% endif %}
 
       <!-- Removal Modals (one for each player) -->
       {% include 'tournament/snippets/player_remove_modal.html' with players=players %}
 
-      {% endfor %}
-      {% for invite in invites %}
-      <tr>
-        <td scope="row" class="player-row">{{invite.send_to.username}}</td>
-        <td class="player-row">Invite pending</td>
-        <td class="player-row">
-          {% if request.user == tournament.admin %}
-            <a hx-post="{% url 'tournament:uninvite' player_id=invite.send_to.id tournament_id=invite.tournament.id %}" hx-target="#body_container" hx-swap="innerHTML" class="btn btn-warning btn-sm player-action-button">Uninvite</a>
-          {% elif request.user == invite.send_to %}
-            <a hx-post="{% url 'tournament:join_tournament' pk=invite.id %}" hx-target="#body_container" hx-swap="innerHTML" class="btn btn-primary btn-sm player-action-button">Join</a>
-          {% endif %}
-        </td>
-      </tr>
       {% endfor %}
   </tbody>
 </table>

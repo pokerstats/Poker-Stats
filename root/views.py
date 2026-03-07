@@ -4,11 +4,7 @@ from django.utils import timezone
 from decimal import Decimal
 import random
 
-from tournament.models import (
-	TournamentInvite,
-	TournamentPlayer,
-	TournamentState,
-)
+from tournament.models import TournamentPlayer
 from tournament_group.models import TournamentGroup
 from tournament_analytics.models import TournamentTotals
 
@@ -17,12 +13,6 @@ def root_view(request):
 		user = request.user
 		context = {}
 		if user.is_authenticated:
-			invites = TournamentInvite.objects.find_pending_invites_for_user(user.id)
-			for invite in invites:
-				if invite.tournament.get_state() == TournamentState.COMPLETED:
-					invites = invites.exclude(tournament=invite.tournament)
-			context['invites'] = invites
-
 			# get all the Tournaments that this user has joined
 			tournament_players = TournamentPlayer.objects.get_all_tournament_players_by_user_id(user.id)
 			tournaments = []

@@ -1,10 +1,9 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
-from django.test import TransactionTestCase
+from django.test import TestCase
 from unittest import mock
 
 from tournament.models import (
-	TournamentInvite,
 	TournamentPlayerResult,
 	TournamentStructure,
 	TournamentElimination,
@@ -32,313 +31,7 @@ from user.test_util import (
 	build_user
 )
 
-class TournamentInvitesTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
-
-	def setUp(self):
-		# Build some users for the tests
-		users = create_users(
-			identifiers = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
-		)
-
-		# Build a Structure with no bounties and no rebuys
-		structure = build_structure(
-			admin = users[0], # Cat is admin
-			buyin_amount = 115,
-			bounty_amount = 15,
-			payout_percentages = (60, 30, 10),
-			allow_rebuys = False
-		)
-
-		tournament = build_tournament(structure)
-
-	"""
-	Verify correct invitation sent
-	"""
-	def test_user_is_invited_to_tournament(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Invite a player
-		TournamentInvite.objects.send_invite(
-			sent_from_user_id = admin.id,
-			send_to_user_id = users[1].id,
-			tournament_id = tournament.id
-		)
-
-		# Verify the correct player got an invitation
-		invites = TournamentInvite.objects.find_pending_invites(
-			send_to_user_id = users[1].id,
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 1)
-		self.assertEqual(invites[0].send_to, users[1])
-
-		# Verify a TournamentPlayer is created
-		player = TournamentPlayer.objects.get_tournament_player_by_user_id(
-			tournament_id = tournament.id,
-			user_id = users[1].id
-		)
-		self.assertEqual(player.user.id, users[1].id)
-
-		# Verify has_joined_tournament is False because they haven't accepted the invite.
-		has_joined_tournament = TournamentPlayer.objects.has_player_joined_tournament(
-			tournament_id = tournament.id,
-			player_id = player.id
-		)
-		self.assertEqual(has_joined_tournament, False)
-
-	"""
-	Verify cannot send duplicate invites
-	"""
-	def test_cannot_send_duplicate_invites(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Invite a player
-		TournamentInvite.objects.send_invite(
-			sent_from_user_id = admin.id,
-			send_to_user_id = users[1].id,
-			tournament_id = tournament.id
-		)
-		# Try to invite again and verify it fails
-		with self.assertRaisesMessage(ValidationError, f"{users[1].username} has already been invited."):
-			TournamentInvite.objects.send_invite(
-				sent_from_user_id = admin.id,
-				send_to_user_id = users[1].id,
-				tournament_id = tournament.id
-			)
-
-	"""
-	Verify only the admin can send invites.
-	"""
-	def test_cannot_invite_unless_admin(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Try to send an invitation when not the admin
-		new_user = create_users(['horse'])[0]
-		for user in users:
-			if user.username != "cat":
-				with self.assertRaisesMessage(ValidationError, "You can't send invites unless you're the admin."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = user.id,
-						send_to_user_id = new_user.id,
-						tournament_id = tournament.id
-					)
-
-	"""
-	Verify admin is not inviting themself. The admin is automatically added to a Tournament when its created.
-	"""
-	def test_admin_cannot_invite_themself(self):
-		tournament = Tournament.objects.get_by_id(1)
-		admin = User.objects.get_by_username("cat")
-
-		# Try to send an invitation when not the admin
-		with self.assertRaisesMessage(ValidationError, "You can't invite yourself to the Tournament."):
-			TournamentInvite.objects.send_invite(
-				sent_from_user_id = admin.id,
-				send_to_user_id = admin.id,
-				tournament_id = tournament.id
-			)
-
-	"""
-	Verify can't invite to a completed tournament.
-	"""
-	def test_cannot_invite_to_completed_tournament(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Start the Tournament
-		Tournament.objects.start_tournament(user = admin, tournament_id = tournament.id)
-		# Complete Tournament
-		eliminate_players_and_complete_tournament(admin = admin, tournament = tournament)
-
-		# Try to send invites to completed tournament
-		for user in users:
-			if user.username != "cat":
-				with self.assertRaisesMessage(ValidationError, "You can't invite to a Tournment that's completed."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = admin.id,
-						send_to_user_id = user.id,
-						tournament_id = tournament.id
-					)
-
-	"""
-	Verify can't invite to a started tournament.
-	"""
-	def test_cannot_invite_to_started_tournament(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Start the Tournament
-		Tournament.objects.start_tournament(user = admin, tournament_id = tournament.id)
-
-		# Try to send invites to completed tournament
-		for user in users:
-			if user.username != "cat":
-				with self.assertRaisesMessage(ValidationError, "You can't invite to a Tournment that's started."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = admin.id,
-						send_to_user_id = user.id,
-						tournament_id = tournament.id
-					)
-
-	"""
-	Verify can't invite a player who is already in the Tournament
-	"""
-	def test_admin_cannot_invite_tournament_player(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Add the users to the Tournament as TournamentPlayer's
-		add_players_to_tournament(
-			# Remove the admin since they are already a player automatically
-			users = [value for value in users if value.username != "cat"],
-			tournament = tournament
-		)
-
-		# Get the players
-		players = TournamentPlayer.objects.get_tournament_players(
-			tournament_id = tournament.id
-		)
-
-		# Try to invite the players
-		for player in players:
-			if player.user.username != "cat":
-				with self.assertRaisesMessage(ValidationError, f"{player.user.username} is already in this tournament."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = admin.id,
-						send_to_user_id = player.user.id,
-						tournament_id = tournament.id
-					)
-			else:
-				with self.assertRaisesMessage(ValidationError, "You can't invite yourself to the Tournament."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = admin.id,
-						send_to_user_id = player.user.id,
-						tournament_id = tournament.id
-					)
-
-	"""
-	Verify can't uninvite unless admin
-	"""
-	def test_admin_cannot_uninvite_unless_admin(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Invite all users
-		for user in users:
-			if user.username != "cat":
-				TournamentInvite.objects.send_invite(
-					sent_from_user_id = admin.id,
-					send_to_user_id = user.id,
-					tournament_id = tournament.id
-				)
-
-		# Verify they all got invitations
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 8)
-		
-		# Try to uninvite players when not admin
-		for invite in invites:
-			if invite.tournament.admin.username != "cat":
-				with self.assertRaisesMessage(ValidationError, "You can't remove invites unless you're the admin."):
-					TournamentInvite.objects.send_invite(
-						sent_from_user_id = invite.send_to.id,
-						send_to_user_id = admin.id, # this doesn't matter in this case
-						tournament_id = tournament.id
-					)
-		
-	"""
-	Verify can't uninvite someone who has never been invited
-	"""
-	def test_admin_cannot_uninvite_if_no_invite_exists(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# Invite all users except "dog"
-		for user in users:
-			if user.username != "cat" and user.username != "dog":
-				TournamentInvite.objects.send_invite(
-					sent_from_user_id = admin.id,
-					send_to_user_id = user.id,
-					tournament_id = tournament.id
-				)
-
-		# Verify cannot uninvite "Dog" since they were never invited.
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 7)
-		dog = User.objects.get_by_username("dog")
-		with self.assertRaisesMessage(ValidationError, "That player does not have an invition to this tournament."):
-			TournamentInvite.objects.uninvite_player_from_tournament(
-				admin_id = admin.id,
-				uninvite_user_id = dog.id,
-				tournament_id = tournament.id
-			)
-
-	"""
-	Verify invites were sent and then removed
-	"""
-	def test_invites_sent_and_removed(self):
-		tournament = Tournament.objects.get_by_id(1)
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-
-		# send invitations
-		for user in users:
-			if user.username != "cat":
-				TournamentInvite.objects.send_invite(
-					sent_from_user_id = admin.id,
-					send_to_user_id = user.id,
-					tournament_id = tournament.id
-				)
-
-		# Verify all users were invited
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 8)
-
-		# Uninvite everyone
-		for invite in invites:
-			TournamentInvite.objects.uninvite_player_from_tournament(
-				admin_id = admin.id,
-				uninvite_user_id = invite.send_to.id,
-				tournament_id = tournament.id
-			)
-		# Verify all invitations were removed.
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 0)
-
-		# Verify the TournamentPlayer's were deleted except the admin
-		players = TournamentPlayer.objects.get_tournament_players(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(players), 1)
-		self.assertEqual(players[0].user, admin)
-
-
-class TournamentPlayersTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentPlayersTestCase(TestCase):
 
 	def setup_tournament(self, admin, allow_rebuys):
 		# Build a Structure that allows rebuys
@@ -358,69 +51,6 @@ class TournamentPlayersTestCase(TransactionTestCase):
 		users = create_users(
 			identifiers = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
 		)
-
-	"""
-	Verify join_tournament
-	"""
-	def test_join_tournament(self):
-		users = User.objects.all()
-		admin = User.objects.get_by_username("cat")
-		tournament = self.setup_tournament(
-			admin = admin,
-			allow_rebuys = False
-		)
-
-		# send invitations
-		for user in users:
-			if user.username != "cat":
-				TournamentInvite.objects.send_invite(
-					sent_from_user_id = admin.id,
-					send_to_user_id = user.id,
-					tournament_id = tournament.id
-				)
-
-		# Verify all users were invited
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 8)
-
-		# join everyone except users[8]
-		for invite in invites:
-			if invite.send_to != users[8]:
-				player = TournamentPlayer.objects.get_tournament_player_by_user_id(
-					tournament_id = tournament.id,
-					user_id = invite.send_to.id
-				)
-				TournamentPlayer.objects.join_tournament(
-					player = player
-				)
-
-		# Verify all invitations were removed except users[8] invitation.
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 1)
-		self.assertEqual(invites[0].send_to, users[8])
-
-		# Verify the TournamentPlayer's have has_joined_tournament == True except users[8]
-		players = TournamentPlayer.objects.get_tournament_players(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(players), 9)
-		for player in players:
-			if player.user == users[8]:
-				has_joined_tournament = TournamentPlayer.objects.has_player_joined_tournament(
-					tournament_id = tournament.id,
-					player_id = player.id
-				)
-				self.assertEqual(has_joined_tournament, False)
-			else:
-				has_joined_tournament = TournamentPlayer.objects.has_player_joined_tournament(
-					tournament_id = tournament.id,
-					player_id = player.id
-				)
-				self.assertEqual(has_joined_tournament, True)
 
 	"""
 	Verify the players are added correctly to the Tournament.
@@ -582,8 +212,8 @@ class TournamentPlayersTestCase(TransactionTestCase):
 		# Verify cannot remove
 		with self.assertRaisesMessage(ValidationError, "You can't remove players from a Tournment that is completed"):
 			TournamentPlayer.objects.remove_player_from_tournament(
-				removed_by_user_id = users[0].id,
-				removed_user_id = users[1].id,
+				removed_by_user_id = admin.id,
+				removed_user_id = User.objects.get_by_username("dog").id,
 				tournament_id = tournament.id
 			)
 
@@ -621,10 +251,7 @@ class TournamentPlayersTestCase(TransactionTestCase):
 				tournament_id = tournament.id
 			)
 
-class TournamentRebuysTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentRebuysTestCase(TestCase):
 	
 	def setup_tournament(self, allow_rebuys):
 		users = create_users(
@@ -1032,11 +659,8 @@ class TournamentRebuysTestCase(TransactionTestCase):
 		self.assertEqual(len(rebuys), 0)
 
 
-class TournamentEliminationsTestCase(TransactionTestCase):
+class TournamentEliminationsTestCase(TestCase):
 
-	# Reset primary keys after each test function run
-	reset_sequences = True
-	
 	def setUp(self):
 		# Build some users for the tests
 		users = create_users(
@@ -1052,20 +676,20 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 			allow_rebuys = False
 		)
 
-		tournament = build_tournament(structure)
+		self.tournament = build_tournament(structure)
 
 		# Add the users to the Tournament as TournamentPlayer's
 		add_players_to_tournament(
 			# Remove the admin since they are already a player automatically
 			users = [value for value in users if value.username != "cat"],
-			tournament = tournament
+			tournament = self.tournament
 		)
 
 	"""
 	Test the eliminations
 	"""
 	def test_eliminations(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -1136,7 +760,7 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 	is not part of the tournment.
 	"""
 	def test_cannot_eliminate_user_who_has_not_joined_tournament(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		new_user = create_users(['horse'])[0]
 
@@ -1150,22 +774,22 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 		with self.assertRaisesMessage(ValidationError, "Eliminatee is not part of that Tournament."):
 			eliminate_player(
 				tournament_id = tournament_id,
-				eliminator_id = players[0].user.id,
-				eliminatee_id = new_user.id # This will fail b/c its not a TournamentPlayer
+				eliminator_id = players[0].id,
+				eliminatee_id = 9999999 # This will fail b/c its not a TournamentPlayer
 			)
 
 		with self.assertRaisesMessage(ValidationError, "Eliminator is not part of that Tournament."):
 			eliminate_player(
 				tournament_id = tournament_id,
-				eliminator_id = new_user.id, # This will fail b/c its not a TournamentPlayer
-				eliminatee_id = players[0].user.id 
+				eliminator_id = 9999999, # This will fail b/c its not a TournamentPlayer
+				eliminatee_id = players[0].id
 			)
 
 	"""
 	Verify you cannot eliminate a player that is already eliminated
 	"""
 	def test_cannot_eliminate_player_who_is_already_eliminated(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 
 		players = TournamentPlayer.objects.get_tournament_players(
@@ -1193,7 +817,7 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 	Verify you cannot eliminate a player when the tournament is not started.
 	"""
 	def test_cannot_eliminate_player_when_tournament_not_active(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 
 		players = TournamentPlayer.objects.get_tournament_players(
@@ -1211,7 +835,7 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 	Test cannot eliminate the final player. The Tournament should be completed.
 	"""
 	def test_cannot_eliminate_last_player(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -1239,10 +863,7 @@ class TournamentEliminationsTestCase(TransactionTestCase):
 			)
 
 
-class TournamentTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentTestCase(TestCase):
 	
 	"""
 	bounty_amount: If None, this is not a bounty tournament.
@@ -1393,16 +1014,28 @@ class TournamentTestCase(TransactionTestCase):
 		)
 
 		touraments2 = Tournament.objects.get_by_user(user = cat)
+
+
 		self.assertEqual(len(touraments2), 2)
-		self.assertEqual(touraments2[1].admin, cat)
-		self.assertEqual(touraments2[1].title, "Cat Tournament 2")
-		self.assertEqual(touraments2[1].tournament_structure.buyin_amount, 199)
-		self.assertEqual(touraments2[1].tournament_structure.bounty_amount, None)
-		self.assertEqual(touraments2[1].tournament_structure.payout_percentages, [60, 20, 15, 5])
-		self.assertEqual(touraments2[1].tournament_structure.allow_rebuys, True)
+		t1 = touraments2.get(title="Cat Tournament")
+		t2 = touraments2.get(title="Cat Tournament 2")
+
+		# Verify Cat Tournament 2
+		self.assertEqual(t2.admin, cat)
+		self.assertEqual(t2.tournament_structure.buyin_amount, 199)
+		self.assertEqual(t2.tournament_structure.bounty_amount, None)
+		self.assertEqual(t2.tournament_structure.payout_percentages, [60, 20, 15, 5])
+		self.assertEqual(t2.tournament_structure.allow_rebuys, True)
+
+		# Verify Cat Tournament 1 is the same as previous assertions
+		self.assertEqual(t1.admin, cat)
+		self.assertEqual(t1.tournament_structure.buyin_amount, 100)
+		self.assertEqual(t1.tournament_structure.bounty_amount, 10)
+		self.assertEqual(t1.tournament_structure.payout_percentages, [100])
+		self.assertEqual(t1.tournament_structure.allow_rebuys, False)
 
 		# Verify the admin is added as a TournamentPlayer
-		players2 = TournamentPlayer.objects.get_tournament_players(touraments2[1].id)
+		players2 = TournamentPlayer.objects.get_tournament_players(t1.id)
 		self.assertEqual(len(players2), 1)
 		self.assertEqual(players2[0].user, cat)
 
@@ -1445,26 +1078,10 @@ class TournamentTestCase(TransactionTestCase):
 			structure = structure
 		)
 
-		# invite dog to cat's tournament
-		TournamentInvite.objects.send_invite(
-			sent_from_user_id = cat.id,
-			send_to_user_id = dog.id,
-			tournament_id = cat_tournament.id
-		)
-
-		# Verify dog's joined tournaments list is empty
-		dogs_joined_tournaments = Tournament.objects.get_joined_tournaments(
-			user_id = dog.id
-		)
-		self.assertEqual(len(dogs_joined_tournaments), 0)
-
-		# Now join the tournament on dog
-		dog_player = TournamentPlayer.objects.get_tournament_player_by_user_id(
+		# add dog to cat's tournament
+		TournamentPlayer.objects.create_player_for_tournament(
 			user_id = dog.id,
 			tournament_id = cat_tournament.id
-		)
-		TournamentPlayer.objects.join_tournament(
-			player = dog_player
 		)
 
 		# Verify dog's joined tournaments list is NOT empty
@@ -1975,26 +1592,10 @@ class TournamentTestCase(TransactionTestCase):
 			structure = structure
 		)
 
-		# Send an invite to "dog""
-		dog = User.objects.get_by_username("dog")
-		TournamentInvite.objects.send_invite(
-			sent_from_user_id = cat.id,
-			send_to_user_id = dog.id,
-			tournament_id = tournament.id
-		)
-
 		# Verify the state is ACTIVE
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 		tournament = Tournament.objects.get_by_id(tournament.id)
 		self.assertEqual(tournament.get_state(), TournamentState.ACTIVE)
-
-		# Verify pending invites were not deleted.
-		invites = TournamentInvite.objects.find_pending_invites_for_tournament(
-			tournament_id = tournament.id
-		)
-		self.assertEqual(len(invites), 1)
-		self.assertEqual(invites[0].send_to, dog)
-		self.assertEqual(invites[0].tournament, tournament)
 
 	"""
 	Verify cannot calculate tournament value until tournament is complete
@@ -2140,24 +1741,28 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
 			# Third
 			PlayerTournamentPlacement(
-				player_id = 6,
+				player_id = p[6].id,
 				placement = 2,
 			),
 		]
@@ -2168,22 +1773,22 @@ class TournamentTestCase(TransactionTestCase):
 		).order_by("id")
 		elim_dict = {
 			# cat eliminates player3, player4, player5
-			1: [players[2], players[3], players[4]],
+			p[1].id: [players[2], players[3], players[4]],
 
 			# player2 eliminates player9 (twice), player1, player4, player6
-			2: [players[8], players[0], players[3], players[8], players[5]],
+			p[2].id: [players[8], players[0], players[3], players[8], players[5]],
 
 			# player5 eliminates player7, player6, player2
-			5: [players[6], players[5], players[1]],
+			p[5].id: [players[6], players[5], players[1]],
 
 			# player7 eliminates player8
-			7: [players[7]],
+			p[7].id: [players[7]],
 
 			# player8 eliminates player1
-			8: [players[0]],
+			p[8].id: [players[0]],
 
 			# player9 eliminates player7
-			9: [players[6]],
+			p[9].id: [players[6]],
 		}
 
 		# --- Split Eliminations ----
@@ -2219,7 +1824,7 @@ class TournamentTestCase(TransactionTestCase):
 		bounty_amount = Decimal(11.70)
 		for result in results:
 			self.assertEqual(result.is_backfill, True)
-			if result.player.id == 9:
+			if result.player.user.username == "racoon":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2230,7 +1835,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 8:
+			elif result.player.user.username == "insect":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2241,7 +1846,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 7:
+			elif result.player.user.username == "gator":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2252,7 +1857,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 6:
+			elif result.player.user.username == "elephant":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2263,7 +1868,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 5:
+			elif result.player.user.username == "donkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2274,7 +1879,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 4:
+			elif result.player.user.username == "bird":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2285,7 +1890,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 3:
+			elif result.player.user.username == "monkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2296,7 +1901,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 2:
+			elif result.player.user.username == "dog":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2307,7 +1912,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 1:
+			elif result.player.user.username == "cat":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2353,24 +1958,28 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
 			# Third
 			PlayerTournamentPlacement(
-				player_id = 6,
+				player_id = p[6].id,
 				placement = 2,
 			),
 		]
@@ -2381,22 +1990,22 @@ class TournamentTestCase(TransactionTestCase):
 		).order_by("id")
 		elim_dict = {
 			# cat eliminates player3, player4, player5
-			1: [players[2], players[3], players[4]],
+			p[1].id: [players[2], players[3], players[4]],
 
 			# player2 eliminates player9 (twice), player1, player4, player6
-			2: [players[8], players[0], players[3], players[8], players[5]],
+			p[2].id: [players[8], players[0], players[3], players[8], players[5]],
 
 			# player5 eliminates player7, player6, player2
-			5: [players[6], players[5], players[1]],
+			p[5].id: [players[6], players[5], players[1]],
 
 			# player7 eliminates player8
-			7: [players[7]],
+			p[7].id: [players[7]],
 
 			# player8 eliminates player1
-			8: [players[0]],
+			p[8].id: [players[0]],
 
 			# player9 eliminates player7
-			9: [players[6]],
+			p[9].id: [players[6]],
 		}
 
 		# Execute the backfill
@@ -2417,7 +2026,7 @@ class TournamentTestCase(TransactionTestCase):
 		# 1728
 		for result in results:
 			self.assertEqual(result.is_backfill, True)
-			if result.player.id == 9:
+			if result.player.user.username == "racoon":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2428,7 +2037,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 8:
+			elif result.player.user.username == "insect":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2439,7 +2048,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 7:
+			elif result.player.user.username == "gator":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2450,7 +2059,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 6:
+			elif result.player.user.username == "elephant":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2461,7 +2070,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 5:
+			elif result.player.user.username == "donkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2472,7 +2081,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 4:
+			elif result.player.user.username == "bird":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2483,7 +2092,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 3:
+			elif result.player.user.username == "monkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2494,7 +2103,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 2:
+			elif result.player.user.username == "dog":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2505,7 +2114,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 1:
+			elif result.player.user.username == "cat":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2551,24 +2160,28 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
 			# Third
 			PlayerTournamentPlacement(
-				player_id = 6,
+				player_id = p[6].id,
 				placement = 2,
 			),
 		]
@@ -2578,12 +2191,12 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id
 		).order_by("id")
 		elim_dict = {
-			1: [players[2], players[4]],
-			2: [players[8], players[3],  players[5]],
-			5: [],
-			7: [players[7], players[1]],
-			8: [],
-			9: [players[6]],
+			p[1].id: [players[2], players[4]],
+			p[2].id: [players[8], players[3],  players[5]],
+			p[5].id: [],
+			p[7].id: [players[7], players[1]],
+			p[8].id: [],
+			p[9].id: [players[6]],
 		}
 
 		# Execute the backfill
@@ -2604,7 +2217,7 @@ class TournamentTestCase(TransactionTestCase):
 		# 1036.80
 		for result in results:
 			self.assertEqual(result.is_backfill, True)
-			if result.player.id == 9:
+			if result.player.user.username == "racoon":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2615,7 +2228,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 8:
+			elif result.player.user.username == "insect":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2626,7 +2239,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 7:
+			elif result.player.user.username == "gator":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2637,7 +2250,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 6:
+			elif result.player.user.username == "elephant":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2648,7 +2261,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 5:
+			elif result.player.user.username == "donkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2659,7 +2272,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 4:
+			elif result.player.user.username == "bird":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2670,7 +2283,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 3:
+			elif result.player.user.username == "monkey":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2681,7 +2294,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 2:
+			elif result.player.user.username == "dog":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2692,7 +2305,7 @@ class TournamentTestCase(TransactionTestCase):
 					buyin_amount = buyin_amount,
 					bounty_amount = bounty_amount
 				)
-			elif result.player.id == 1:
+			elif result.player.user.username == "cat":
 				self.verify_result(
 					result = result,
 					is_backfill = True,
@@ -2736,18 +2349,22 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
@@ -2760,22 +2377,22 @@ class TournamentTestCase(TransactionTestCase):
 		).order_by("id")
 		elim_dict = {
 			# cat eliminates player3, player4, player5
-			1: [players[2], players[3], players[4]],
+			p[1].id: [players[2], players[3], players[4]],
 
 			# player2 eliminates player9 (twice), player1, player4, player6
-			2: [players[8], players[0], players[3], players[8], players[5]],
+			p[2].id: [players[8], players[0], players[3], players[8], players[5]],
 
 			# player5 eliminates player7, player6, player2
-			5: [players[6], players[5], players[1]],
+			p[5].id: [players[6], players[5], players[1]],
 
 			# player7 eliminates player8
-			7: [players[7]],
+			p[7].id: [players[7]],
 
 			# player8 eliminates player1
-			8: [players[0]],
+			p[8].id: [players[0]],
 
 			# player9 eliminates player7
-			9: [players[6]],
+			p[9].id: [players[6]],
 		}
 
 		with self.assertRaisesMessage(ValidationError, "The tournament structure requires you select 3 players who placed in the tournament."):
@@ -2820,24 +2437,28 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
 			# Third (SAME PLAYER AS second)
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 2,
 			),
 		]
@@ -2848,22 +2469,22 @@ class TournamentTestCase(TransactionTestCase):
 		).order_by("id")
 		elim_dict = {
 			# cat eliminates player3, player4, player5
-			1: [players[2], players[3], players[4]],
+			p[1].id: [players[2], players[3], players[4]],
 
 			# player2 eliminates player9 (twice), player1, player4, player6
-			2: [players[8], players[0], players[3], players[8], players[5]],
+			p[2].id: [players[8], players[0], players[3], players[8], players[5]],
 
 			# player5 eliminates player7, player6, player2
-			5: [players[6], players[5], players[1]],
+			p[5].id: [players[6], players[5], players[1]],
 
 			# player7 eliminates player8
-			7: [players[7]],
+			p[7].id: [players[7]],
 
 			# player8 eliminates player1
-			8: [players[0]],
+			p[8].id: [players[0]],
 
 			# player9 eliminates player7
-			9: [players[6]],
+			p[9].id: [players[6]],
 		}
 
 		with self.assertRaisesMessage(ValidationError, "You can't specify the same player for multiple placements."):
@@ -2908,24 +2529,28 @@ class TournamentTestCase(TransactionTestCase):
 			tournament_id = tournament.id,
 			user_id = cat.id
 		)
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_all = TournamentPlayer.objects.get_tournament_players(tournament_id=tournament.id)
+		p_by_name = {pl.user.username: pl for pl in p_all}
+		p = {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 		# --- Placements ----
 		player_tournament_placements = [
 			# First
 			PlayerTournamentPlacement(
-				player_id = 1,
+				player_id = p[1].id,
 				placement = 0,
 			),
 
 			# Second
 			PlayerTournamentPlacement(
-				player_id = 9,
+				player_id = p[9].id,
 				placement = 1,
 			),
 
 			# Third
 			PlayerTournamentPlacement(
-				player_id = 3,
+				player_id = p[3].id,
 				placement = 2,
 			),
 		]
@@ -2936,21 +2561,21 @@ class TournamentTestCase(TransactionTestCase):
 		).order_by("id")
 		elim_dict = {
 			# cat eliminates player3, player4, player5
-			1: [players[2], players[3], players[4]],
+			p[1].id: [players[2], players[3], players[4]],
 
 			# player2 eliminates player9 (twice), player1, player4, player6
-			2: [players[8], players[0], players[3], players[8], players[5]],
+			p[2].id: [players[8], players[0], players[3], players[8], players[5]],
 
 			# player5 eliminates player7, player6, player2
-			5: [players[6], players[5], players[1]],
+			p[5].id: [players[6], players[5], players[1]],
 
-			7: [],
+			p[7].id: [],
 
 			# player8 eliminates player1
-			8: [players[0]],
+			p[8].id: [players[0]],
 
 			# player9 eliminates player7
-			9: [players[6]],
+			p[9].id: [players[6]],
 		}
 
 		# Note: players[7] was never eliminated and they did not win. So error will throw.
@@ -3080,11 +2705,8 @@ class TournamentTestCase(TransactionTestCase):
 		self.assertEqual(tournament.started_at, None)
 
 
-class TournamentSplitEliminationsTestCase(TransactionTestCase):
+class TournamentSplitEliminationsTestCase(TestCase):
 
-	# Reset primary keys after each test function run
-	reset_sequences = True
-	
 	def setUp(self):
 		# Build some users for the tests
 		users = create_users(
@@ -3100,13 +2722,13 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 			allow_rebuys = False
 		)
 
-		tournament = build_tournament(structure)
+		self.tournament = build_tournament(structure)
 
 		# Add the users to the Tournament as TournamentPlayer's
 		add_players_to_tournament(
 			# Remove the admin since they are already a player automatically
 			users = [value for value in users if value.username != "cat"],
-			tournament = tournament
+			tournament = self.tournament
 		)
 
 
@@ -3114,7 +2736,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Test the split eliminations
 	"""
 	def test_split_eliminations(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -3198,7 +2820,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Test you cannot do a split elimination when specifying only one eliminator.
 	"""
 	def test_split_eliminations(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -3219,7 +2841,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	is not part of the tournment.
 	"""
 	def test_cannot_split_eliminate_user_who_has_not_joined_tournament(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		new_user = create_users(['horse'])[0]
 
@@ -3233,22 +2855,22 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 		with self.assertRaisesMessage(ValidationError, "Eliminatee is not part of that Tournament."):
 			split_eliminate_player(
 				tournament_id = tournament_id,
-				eliminator_ids = [players[0].user.id, players[1].user.id],
-				eliminatee_id = new_user.id # This will fail b/c its not a TournamentPlayer
+				eliminator_ids = [players[0].id, players[1].id],
+				eliminatee_id = 9999999 # This will fail b/c its not a TournamentPlayer
 			)
 
 		with self.assertRaisesMessage(ValidationError, "Eliminator is not part of that Tournament."):
 			split_eliminate_player(
 				tournament_id = tournament_id,
-				eliminator_ids = [new_user.id, players[2].user.id], # This will fail b/c its not a TournamentPlayer
-				eliminatee_id = players[0].user.id 
+				eliminator_ids = [9999999, players[2].id], # This will fail b/c its not a TournamentPlayer
+				eliminatee_id = players[0].id
 			)
 
 	"""
 	Verify you cannot split eliminate a player that is already eliminated
 	"""
 	def test_cannot_split_eliminate_player_who_is_already_eliminated(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 
 		players = TournamentPlayer.objects.get_tournament_players(
@@ -3276,7 +2898,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Verify you cannot specifiy the same user as an eliminator more than once during a split elimination.
 	"""
 	def test_cannot_specify_same_eliminator_multiple_times_for_split_elimination(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 
 		players = TournamentPlayer.objects.get_tournament_players(
@@ -3297,7 +2919,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Verify you cannot split eliminate a player when the tournament is not started.
 	"""
 	def test_cannot_split_eliminate_player_when_tournament_not_active(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 
 		players = TournamentPlayer.objects.get_tournament_players(
@@ -3315,7 +2937,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Test cannot split eliminate the final player. The Tournament should be completed.
 	"""
 	def test_cannot_split_eliminate_last_player(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -3346,7 +2968,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Test cannot split eliminate themself.
 	"""
 	def test_cannot_split_eliminate_last_player(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -3366,7 +2988,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 	Test must choose at least 2 players to do a split elimination.
 	"""
 	def test_must_choose_at_least_2_players_to_perform_split_elimination(self):
-		tournament = Tournament.objects.get_by_id(1)
+		tournament = self.tournament
 		tournament_id = tournament.id
 		players = TournamentPlayer.objects.get_tournament_players(
 			tournament_id = tournament.id
@@ -3383,10 +3005,7 @@ class TournamentSplitEliminationsTestCase(TransactionTestCase):
 			)
 
 
-class TournamentPlayerResultTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentPlayerResultTestCase(TestCase):
 	
 	"""
 	bounty_amount: If None, this is not a bounty tournament.
@@ -3408,6 +3027,11 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			tournament_structure = structure
 		)
 		return tournament
+
+	def build_player_lookup(self, tournament_id):
+		p_names = ["cat", "dog", "monkey", "bird", "donkey", "elephant", "gator", "insect", "racoon"]
+		p_by_name = {pl.user.username: pl for pl in TournamentPlayer.objects.get_tournament_players(tournament_id)}
+		return {i+1: p_by_name[name] for i, name in enumerate(p_names)}
 
 	def build_placement_percentages(num_placements):
 		if num_placements > 9:
@@ -3451,6 +3075,7 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 			placement_data = PlayerPlacementData(
 				user_id = result.player.user.id,
+				username = result.player.user.username,
 				placement = result.placement,
 				placement_earnings = f"{result.placement_earnings}",
 				investment = f"{result.investment}",
@@ -3558,12 +3183,12 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Eliminate in a specific order so we can verify. 6 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 5 elim 7, 3 elim 5, 2 elim 3, etc...
 		# So expected placement order is: [6, 4, 8, 9, 1, 2, 3, 5, 7]
-		eliminatee_order = [7, 5, 3, 2, 1, 9, 8, 4]
-		eliminator_order = [5, 3, 2, 1, 9, 8, 4, 6]
+		eliminatee_order = [p[7].id, p[5].id, p[3].id, p[2].id, p[1].id, p[9].id, p[8].id, p[4].id]
+		eliminator_order = [p[5].id, p[3].id, p[2].id, p[1].id, p[9].id, p[8].id, p[4].id, p[6].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3582,15 +3207,15 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		)
 
 		self.assertEqual(len(placement_dict), 9) # There were only 9 players
-		self.assertEqual(placement_dict[0].user_id, 6)
-		self.assertEqual(placement_dict[1].user_id, 4)
-		self.assertEqual(placement_dict[2].user_id, 8)
-		self.assertEqual(placement_dict[3].user_id, 9)
-		self.assertEqual(placement_dict[4].user_id, 1)
-		self.assertEqual(placement_dict[5].user_id, 2)
-		self.assertEqual(placement_dict[6].user_id, 3)
-		self.assertEqual(placement_dict[7].user_id, 5)
-		self.assertEqual(placement_dict[8].user_id, 7)
+		self.assertEqual(placement_dict[0].username, "elephant")
+		self.assertEqual(placement_dict[1].username, "bird")
+		self.assertEqual(placement_dict[2].username, "insect")
+		self.assertEqual(placement_dict[3].username, "racoon")
+		self.assertEqual(placement_dict[4].username, "cat")
+		self.assertEqual(placement_dict[5].username, "dog")
+		self.assertEqual(placement_dict[6].username, "monkey")
+		self.assertEqual(placement_dict[7].username, "donkey")
+		self.assertEqual(placement_dict[8].username, "gator")
 
 	"""
 	Verify placement is calculated correctly.
@@ -3623,12 +3248,12 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 5 elim 7, 9 elim 5, 9 elim 3, etc...
 		# So expected placement order is: [9, 6, 8, 4, 5, 3, 2, 1, 7]
-		eliminatee_order = [7, 1, 2, 3, 5, 4, 8, 6]
-		eliminator_order = [5, 9, 9, 9, 9, 9, 4, 9]
+		eliminatee_order = [p[7].id, p[1].id, p[2].id, p[3].id, p[5].id, p[4].id, p[8].id, p[6].id]
+		eliminator_order = [p[5].id, p[9].id, p[9].id, p[9].id, p[9].id, p[9].id, p[4].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3647,15 +3272,15 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		)
 
 		self.assertEqual(len(placement_dict), 9) # There were only 9 players
-		self.assertEqual(placement_dict[0].user_id, 9)
-		self.assertEqual(placement_dict[1].user_id, 6)
-		self.assertEqual(placement_dict[2].user_id, 8)
-		self.assertEqual(placement_dict[3].user_id, 4)
-		self.assertEqual(placement_dict[4].user_id, 5)
-		self.assertEqual(placement_dict[5].user_id, 3)
-		self.assertEqual(placement_dict[6].user_id, 2)
-		self.assertEqual(placement_dict[7].user_id, 1)
-		self.assertEqual(placement_dict[8].user_id, 7)
+		self.assertEqual(placement_dict[0].username, "racoon")
+		self.assertEqual(placement_dict[1].username, "elephant")
+		self.assertEqual(placement_dict[2].username, "insect")
+		self.assertEqual(placement_dict[3].username, "bird")
+		self.assertEqual(placement_dict[4].username, "donkey")
+		self.assertEqual(placement_dict[5].username, "monkey")
+		self.assertEqual(placement_dict[6].username, "dog")
+		self.assertEqual(placement_dict[7].username, "cat")
+		self.assertEqual(placement_dict[8].username, "gator")
 
 	"""
 	Verify placement is calculated correctly.
@@ -3688,10 +3313,11 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Manunally add some rebuys
-		# These are the player_id's of the players who rebought.
 		# So 1 has two rebuys. 5, 7 and 8 have one rebuy each.
-		rebuys = [1, 5, 7, 8, 1]
+		rebuys = [p[1].id, p[5].id, p[7].id, p[8].id, p[1].id]
 		for player_id in rebuys:
 			rebuy_for_test(
 				tournament_id = tournament.id,
@@ -3699,11 +3325,9 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 2 elim 1, 5 elim 1, 9 elim 5, 7 elim 2, etc...
 		# So expected placement order is: [9, 7, 8, 1, 5, 6, 4, 3, 2]
-		eliminatee_order = [1, 1, 5, 2, 3, 4, 6, 5, 7, 8, 1, 8, 7]
-		eliminator_order = [2, 5, 9, 7, 8, 1, 1, 9, 8, 1, 9, 7, 9]
+		eliminatee_order = [p[1].id, p[1].id, p[5].id, p[2].id, p[3].id, p[4].id, p[6].id, p[5].id, p[7].id, p[8].id, p[1].id, p[8].id, p[7].id]
+		eliminator_order = [p[2].id, p[5].id, p[9].id, p[7].id, p[8].id, p[1].id, p[1].id, p[9].id, p[8].id, p[1].id, p[9].id, p[7].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3723,15 +3347,15 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		)
 
 		self.assertEqual(len(placement_dict), 9) # There were only 9 players
-		self.assertEqual(placement_dict[0].user_id, 9)
-		self.assertEqual(placement_dict[1].user_id, 7)
-		self.assertEqual(placement_dict[2].user_id, 8)
-		self.assertEqual(placement_dict[3].user_id, 1)
-		self.assertEqual(placement_dict[4].user_id, 5)
-		self.assertEqual(placement_dict[5].user_id, 6)
-		self.assertEqual(placement_dict[6].user_id, 4)
-		self.assertEqual(placement_dict[7].user_id, 3)
-		self.assertEqual(placement_dict[8].user_id, 2)
+		self.assertEqual(placement_dict[0].username, "racoon")
+		self.assertEqual(placement_dict[1].username, "gator")
+		self.assertEqual(placement_dict[2].username, "insect")
+		self.assertEqual(placement_dict[3].username, "cat")
+		self.assertEqual(placement_dict[4].username, "donkey")
+		self.assertEqual(placement_dict[5].username, "elephant")
+		self.assertEqual(placement_dict[6].username, "bird")
+		self.assertEqual(placement_dict[7].username, "monkey")
+		self.assertEqual(placement_dict[8].username, "dog")
 
 	"""
 	Verify placement earnings is calculated correctly.
@@ -3764,12 +3388,12 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 5 elim 7, 9 elim 5, 9 elim 3, etc...
 		# So expected placement order is: [9, 6, 8, 4, 5, 3, 2, 1, 7]
-		eliminatee_order = [7, 1, 2, 3, 5, 4, 8, 6]
-		eliminator_order = [5, 9, 9, 9, 9, 9, 4, 9]
+		eliminatee_order = [p[7].id, p[1].id, p[2].id, p[3].id, p[5].id, p[4].id, p[8].id, p[6].id]
+		eliminator_order = [p[5].id, p[9].id, p[9].id, p[9].id, p[9].id, p[9].id, p[4].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3828,10 +3452,11 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Manunally add some rebuys
-		# These are the player_id's of the players who rebought.
 		# So 1 has two rebuys. 5, 7 and 8 have one rebuy each.
-		rebuys = [1, 5, 7, 8, 1]
+		rebuys = [p[1].id, p[5].id, p[7].id, p[8].id, p[1].id]
 		for player_id in rebuys:
 			rebuy_for_test(
 				tournament_id = tournament.id,
@@ -3839,11 +3464,9 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 2 elim 1, 5 elim 1, 9 elim 5, 7 elim 2, etc...
 		# So expected placement order is: [9, 7, 8, 1, 5, 6, 4, 3, 2]
-		eliminatee_order = [1, 1, 5, 2, 3, 4, 6, 5, 7, 8, 1, 8, 7]
-		eliminator_order = [2, 5, 9, 7, 8, 1, 1, 9, 8, 1, 9, 7, 9]
+		eliminatee_order = [p[1].id, p[1].id, p[5].id, p[2].id, p[3].id, p[4].id, p[6].id, p[5].id, p[7].id, p[8].id, p[1].id, p[8].id, p[7].id]
+		eliminator_order = [p[2].id, p[5].id, p[9].id, p[7].id, p[8].id, p[1].id, p[1].id, p[9].id, p[8].id, p[1].id, p[9].id, p[7].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3904,10 +3527,11 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Manunally add some rebuys
-		# These are the player_id's of the players who rebought.
 		# So 1 has two rebuys. 5, 7 and 8 have one rebuy each.
-		rebuys = [1, 5, 7, 8, 1]
+		rebuys = [p[1].id, p[5].id, p[7].id, p[8].id, p[1].id]
 		for player_id in rebuys:
 			rebuy_for_test(
 				tournament_id = tournament.id,
@@ -3915,11 +3539,9 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		# 2 elim 1, 5 elim 1, 9 elim 5, 7 elim 2, etc...
 		# So expected placement order is: [9, 7, 8, 1, 5, 6, 4, 3, 2]
-		eliminatee_order = [1, 1, 5, 2, 3, 4, 6, 5, 7, 8, 1, 8, 7]
-		eliminator_order = [2, 5, 9, 7, 8, 1, 1, 9, 8, 1, 9, 7, 9]
+		eliminatee_order = [p[1].id, p[1].id, p[5].id, p[2].id, p[3].id, p[4].id, p[6].id, p[5].id, p[7].id, p[8].id, p[1].id, p[8].id, p[7].id]
+		eliminator_order = [p[2].id, p[5].id, p[9].id, p[7].id, p[8].id, p[1].id, p[1].id, p[9].id, p[8].id, p[1].id, p[9].id, p[7].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -3980,13 +3602,15 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Add some split eliminations
 		"""
 		1. 7 was split eliminated by 2, 5 and 9.
 		"""
-		split_eliminatee_order = [7]
+		split_eliminatee_order = [p[7].id]
 		split_eliminator_order = [
-			[2, 5, 9]
+			[p[2].id, p[5].id, p[9].id]
 		]
 		for index,eliminatee_id in enumerate(split_eliminatee_order):
 			split_eliminate_player(
@@ -3996,9 +3620,8 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the users.
-		eliminatee_order = [1, 2, 3, 5, 4, 8, 6]
-		eliminator_order = [9, 9, 9, 9, 9, 4, 9]
+		eliminatee_order = [p[1].id, p[2].id, p[3].id, p[5].id, p[4].id, p[8].id, p[6].id]
+		eliminator_order = [p[9].id, p[9].id, p[9].id, p[9].id, p[9].id, p[4].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -4024,7 +3647,7 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				[rebuy.player.id for rebuy in placement_dict[place].rebuys],
 				[]
 			)
-			if placement_dict[place].user_id == 9:
+			if placement_dict[place].username == "racoon":
 				gross_earnings = placement_dict[place].gross_earnings
 				bounty_earnings = Decimal(placement_dict[place].bounty_earnings)
 				placement_earnings = Decimal(placement_dict[place].placement_earnings)
@@ -4034,14 +3657,14 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(place, 0)
 				self.assertEqual(placement_dict[place].bounty_earnings, f"{round(Decimal(162.62), 2)}")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[1, 2, 3, 5, 4, 6]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["cat", "dog", "monkey", "donkey", "bird", "elephant"]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
-			elif placement_dict[place].user_id == 8:
+			elif placement_dict[place].username == "insect":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].gross_earnings, placement_dict[place].placement_earnings)
@@ -4050,10 +3673,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(gross_earnings, f"{round(Decimal(120.73), 2)}")
 				self.assertEqual(placement_dict[place].bounty_earnings, "0.00")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
-			elif placement_dict[place].user_id == 7:
+			elif placement_dict[place].username == "gator":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].gross_earnings, "0.00")
@@ -4062,10 +3685,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "0.00")
 				self.assertEqual(gross_earnings, "0.00")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
-			elif placement_dict[place].user_id == 6:
+			elif placement_dict[place].username == "elephant":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].gross_earnings, placement_dict[place].placement_earnings)
@@ -4074,10 +3697,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "0.00")
 				self.assertEqual(gross_earnings, f"{round(Decimal(241.46), 2)}")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
-			elif placement_dict[place].user_id == 5:
+			elif placement_dict[place].username == "donkey":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				bounty_earnings = Decimal(placement_dict[place].bounty_earnings)
@@ -4087,14 +3710,14 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, f"{round(Decimal(8.48), 2)}")
 				self.assertEqual(gross_earnings, f"{round(Decimal(8.48), 2)}")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
-			elif placement_dict[place].user_id == 4:
+			elif placement_dict[place].username == "bird":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				bounty_earnings = Decimal(placement_dict[place].bounty_earnings)
@@ -4104,10 +3727,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(place, 3)
 				self.assertEqual(gross_earnings, f"{round(Decimal(65.93), 2)}")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[8]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["insect"]
 				)
-			elif placement_dict[place].user_id == 3:
+			elif placement_dict[place].username == "monkey":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].gross_earnings, "0.00")
@@ -4116,10 +3739,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "0.00")
 				self.assertEqual(gross_earnings, "0.00")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
-			elif placement_dict[place].user_id == 2:
+			elif placement_dict[place].username == "dog":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].placement_earnings, "0.00")
@@ -4127,14 +3750,14 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "8.48")
 				self.assertEqual(gross_earnings, "8.48")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
-			elif placement_dict[place].user_id == 1:
+			elif placement_dict[place].username == "cat":
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - investment_decimal, 2)}")
 				self.assertEqual(placement_dict[place].gross_earnings, "0.00")
@@ -4143,7 +3766,7 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "0.00")
 				self.assertEqual(gross_earnings, "0.00")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
 					[]
 				)
 
@@ -4175,13 +3798,14 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			tournament = tournament
 		)
 
+		p = self.build_player_lookup(tournament.id)
+
 		# Start
 		Tournament.objects.start_tournament(user = cat, tournament_id = tournament.id)
 
 		# Manunally add some rebuys
-		# These are the player_id's of the players who rebought.
 		# So 1 has two rebuys. 5, 7 and 8 have one rebuy each.
-		rebuys = [1, 5, 5, 7, 7, 8, 1]
+		rebuys = [p[1].id, p[5].id, p[5].id, p[7].id, p[7].id, p[8].id, p[1].id]
 		for player_id in rebuys:
 			rebuy_for_test(
 				tournament_id = tournament.id,
@@ -4197,10 +3821,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		1. 7 was split eliminated by 2, 5 and 9.
 		2. 5 was split eliminated by 6 and 4
 		"""
-		split_eliminatee_order = [7, 5]
+		split_eliminatee_order = [p[7].id, p[5].id]
 		split_eliminator_order = [
-			[2, 5, 9],
-			[6, 4]
+			[p[2].id, p[5].id, p[9].id],
+			[p[6].id, p[4].id]
 		]
 		for index,eliminatee_id in enumerate(split_eliminatee_order):
 			split_eliminate_player(
@@ -4210,10 +3834,9 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 			)
 
 		# Eliminate in a specific order so we can verify. 9 is the winner here.
-		# These arrays are the primary keys of the players.
 		# 2 elim 1, 5 elim 1, 9 elim 5, 7 elim 2, etc...
-		eliminatee_order = [1, 1, 5, 2, 3, 4, 6, 5, 7, 8, 1, 8, 7]
-		eliminator_order = [2, 5, 9, 7, 8, 1, 1, 9, 8, 1, 9, 7, 9]
+		eliminatee_order = [p[1].id, p[1].id, p[5].id, p[2].id, p[3].id, p[4].id, p[6].id, p[5].id, p[7].id, p[8].id, p[1].id, p[8].id, p[7].id]
+		eliminator_order = [p[2].id, p[5].id, p[9].id, p[7].id, p[8].id, p[1].id, p[1].id, p[9].id, p[8].id, p[1].id, p[9].id, p[7].id, p[9].id]
 		for index,eliminatee_id in enumerate(eliminatee_order):
 			eliminate_player(
 				tournament_id = tournament.id,
@@ -4239,7 +3862,7 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 		# bounty: 411.04
 		# Verify results
 		for place in placement_dict.keys():
-			if placement_dict[place].user_id == 9:
+			if placement_dict[place].username == "racoon":
 				expected_investment = "115.12"
 				gross_earnings = placement_dict[place].gross_earnings
 				bounty_earnings = Decimal(placement_dict[place].bounty_earnings)
@@ -4250,16 +3873,16 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(place, 0)
 				self.assertEqual(placement_dict[place].bounty_earnings, "111.24")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[5, 5, 1, 7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["donkey", "donkey", "cat", "gator"]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
 				self.assertEqual(placement_dict[place].investment, "115.12")
 				self.assertEqual(len(placement_dict[place].rebuys), 0)
-			elif placement_dict[place].user_id == 8:
+			elif placement_dict[place].username == "insect":
 				expected_investment = "230.24"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4268,13 +3891,13 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(gross_earnings, "266.01")
 				self.assertEqual(placement_dict[place].bounty_earnings, "51.38")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[3, 7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["monkey", "gator"]
 				)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 1)
-				self.assertEqual(placement_dict[place].rebuys[0].player.id, 8)
-			elif placement_dict[place].user_id == 7:
+				self.assertEqual(placement_dict[place].rebuys[0].player.user.username, "insect")
+			elif placement_dict[place].username == "gator":
 				expected_investment = "345.36"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4283,13 +3906,13 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(place, 1)
 				self.assertEqual(placement_dict[place].bounty_earnings, "51.38")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[2, 8]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["dog", "insect"]
 				)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 2)
-				self.assertEqual(placement_dict[place].rebuys[0].player.id, 7)
-			elif placement_dict[place].user_id == 6:
+				self.assertEqual(placement_dict[place].rebuys[0].player.user.username, "gator")
+			elif placement_dict[place].username == "elephant":
 				expected_investment = "115.12"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4301,10 +3924,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 0)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[5]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["donkey"]
 				)
-			elif placement_dict[place].user_id == 5:
+			elif placement_dict[place].username == "donkey":
 				expected_investment = "345.36"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4315,17 +3938,17 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "34.17")
 				self.assertEqual(gross_earnings, "34.17")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[1]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["cat"]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 2)
-				self.assertEqual(placement_dict[place].rebuys[0].player.id, 5)
-			elif placement_dict[place].user_id == 4:
+				self.assertEqual(placement_dict[place].rebuys[0].player.user.username, "donkey")
+			elif placement_dict[place].username == "bird":
 				expected_investment = "115.12"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4340,10 +3963,10 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 0)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[5]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["donkey"]
 				)
-			elif placement_dict[place].user_id == 3:
+			elif placement_dict[place].username == "monkey":
 				expected_investment = "115.12"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4355,7 +3978,7 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(len(placement_dict[place].eliminations), 0)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 0)
-			elif placement_dict[place].user_id == 2:
+			elif placement_dict[place].username == "dog":
 				expected_investment = "115.12"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4364,16 +3987,16 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(placement_dict[place].bounty_earnings, "34.17")
 				self.assertEqual(gross_earnings, "34.17")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[1]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["cat"]
 				)
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].split_eliminations],
-					[7]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].split_eliminations],
+					["gator"]
 				)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 0)
-			elif placement_dict[place].user_id == 1:
+			elif placement_dict[place].username == "cat":
 				expected_investment = "345.36"
 				gross_earnings = placement_dict[place].gross_earnings
 				self.assertEqual(placement_dict[place].net_earnings, f"{round(Decimal(gross_earnings) - Decimal(expected_investment), 2)}")
@@ -4382,12 +4005,12 @@ class TournamentPlayerResultTestCase(TransactionTestCase):
 				self.assertEqual(place, 3)
 				self.assertEqual(placement_dict[place].bounty_earnings, "77.07")
 				self.assertEqual(
-					[elimination.eliminatee.id for elimination in placement_dict[place].eliminations],
-					[4, 6, 8]
+					[elimination.eliminatee.user.username for elimination in placement_dict[place].eliminations],
+					["bird", "elephant", "insect"]
 				)
 				self.assertEqual(placement_dict[place].investment, expected_investment)
 				self.assertEqual(len(placement_dict[place].rebuys), 2)
-				self.assertEqual(placement_dict[place].rebuys[0].player.id, 1)
+				self.assertEqual(placement_dict[place].rebuys[0].player.user.username, "cat")
 
 
 

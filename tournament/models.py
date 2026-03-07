@@ -654,7 +654,7 @@ class TournamentManager(models.Manager):
 		return tournament
 
 	def get_by_user(self, user):
-		tournaments = super().get_queryset().filter(admin=user)
+		tournaments = super().get_queryset().filter(admin=user).order_by("-started_at")
 		return tournaments
 
 	"""
@@ -702,35 +702,14 @@ class TournamentManager(models.Manager):
 		return round(Decimal(total_tournament_value), 2)
 
 	"""
-	Return True if all TournamentPlayers have joined.
-	Return False if there are any pending invites.
-	"""
-	def have_all_players_joined_tournament(self, tournament_id):
-		tournament = self.get_by_id(tournament_id)
-		players = TournamentPlayer.objects.get_tournament_players(tournament.id)
-		for player in players:
-			has_joined = TournamentPlayer.objects.has_player_joined_tournament(
-				player_id = player.id,
-				tournament_id = tournament.id
-			)
-			if not has_joined:
-				return False
-		return True
-
-	"""
-	Returns all the Tournaments this user has joined (no pending invite) and is not an admin of.
+	Returns all the Tournaments this user has joined and is not an admin of.
 	"""
 	def get_joined_tournaments(self, user_id):
 		tournament_players = TournamentPlayer.objects.get_all_tournament_players_by_user_id(user_id)
 		tournaments = []
 		for player in tournament_players:
 			if player.tournament.admin != player.user:
-				invites = TournamentInvite.objects.find_pending_invites(
-					send_to_user_id = player.user.id,
-					tournament_id = player.tournament.id
-				)
-				if len(invites) == 0:
-					tournaments.append(player.tournament)
+				tournaments.append(player.tournament)
 		return tournaments
 
 """
@@ -777,18 +756,6 @@ class Tournament(models.Model):
 			return "COMPLETED"
 
 class TournamentPlayerManager(models.Manager):
-
-	def join_tournament(self, player):
-		# Delete the invite. Now the player will be considered as "joined" in the tournament.
-		invites = TournamentInvite.objects.find_pending_invites(
-			send_to_user_id = player.user.id,
-			tournament_id = player.tournament.id
-		)
-		# There should only be one invite but delete them all since its a queryset
-		for invite in invites:
-			invite.delete()
-
-		return player
 
 	def create_player_for_tournament(self, user_id, tournament_id):
 		added_user = User.objects.get_by_id(user_id)
@@ -896,27 +863,6 @@ class TournamentPlayerManager(models.Manager):
 			return None
 
 	"""
-	Returns True if a player has joined a tournament. They are considered as "joined" if they TournamentInvite does not exist.
-	"""
-	def has_player_joined_tournament(self, tournament_id, player_id):
-		try:
-			player = self.get(id=player_id)
-			tournament = Tournament.objects.get_by_id(tournament_id)
-			if player.tournament != tournament:
-				raise ValidationError("That play is not part of this tournament.")
-			invites = TournamentInvite.objects.find_pending_invites(
-				send_to_user_id = player.user.id,
-				tournament_id = tournament_id
-			)
-			if len(invites) == 0:
-				return True
-			else:
-				return False
-		except TournamentPlayer.DoesNotExist:
-			pass
-		return False
-
-	"""
 	Return True is a player has been eliminated from a Tournament (and has no more rebuys).
 	How?
 	Compare the number of times they've been eliminated against the number of rebuys.
@@ -944,125 +890,6 @@ class TournamentPlayer(models.Model):
 
 	def __str__(self):
 		return self.user.username
-
-class TournamentInviteManager(models.Manager):
-	
-	# Send a tournament invite to a user. When they accept, they will become a TournamentPlayer.
-	def send_invite(self, sent_from_user_id, send_to_user_id, tournament_id):
-		try:
-			send_to = User.objects.get_by_id(send_to_user_id)
-			sent_from = User.objects.get_by_id(sent_from_user_id)
-			try:
-				tournament = Tournament.objects.get_by_id(tournament_id)
-
-				# Verify the person sending the invite is the tournament admin
-				if tournament.admin != sent_from:
-					raise ValidationError("You can't send invites unless you're the admin.")
-
-				# Verify the admin is not inviting themself to the tournament
-				if tournament.admin == send_to:
-					raise ValidationError("You can't invite yourself to the Tournament.")
-
-				# Verify the Tournament isn't completed
-				if tournament.get_state() == TournamentState.COMPLETED:
-					raise ValidationError("You can't invite to a Tournment that's completed.")
-
-				# Verify the Tournament isn't started
-				if tournament.get_state() == TournamentState.ACTIVE:
-					raise ValidationError("You can't invite to a Tournment that's started.")
-
-				# Verify there isn't already a pending invite.
-				pending_invite = TournamentInvite.objects.find_pending_invites(send_to.id, tournament.id)
-				if len(pending_invite) > 0:
-					raise ValidationError(f"{send_to.username} has already been invited.")
-
-				# Verify this user isn't already a player in this tournament
-				player = TournamentPlayer.objects.get_tournament_player_by_user_id(
-					user_id = send_to.id,
-					tournament_id = tournament.id
-				)
-				if player != None:
-					raise ValidationError(f"{send_to.username} is already in this tournament.")
-
-				if len(pending_invite) > 0:
-					raise ValidationError(f"{send_to.username} has already been invited.")
-
-				invite = self.model(
-					send_to=send_to,
-					tournament=tournament
-				)
-				invite.save(using=self._db)
-
-				# Create a TournamentPlayer. Note: The player won't be considered as "Joined" until they accept the invitation.
-				TournamentPlayer.objects.create_player_for_tournament(
-					user_id = send_to.id,
-					tournament_id = tournament.id
-				)
-
-				return invite
-			except Tournament.DoesNotExist:
-				raise ValidationError("The tournament you're inviting to doesn't exist.")
-		except User.DoesNotExist:
-			raise ValidationError("The user you're inviting doesn't exist.")
-
-	def uninvite_player_from_tournament(self, admin_id, uninvite_user_id, tournament_id):
-		admin = User.objects.get_by_id(admin_id)
-		uninvite_user = User.objects.get_by_id(uninvite_user_id)
-		tournament = Tournament.objects.get_by_id(tournament_id)
-
-		# Verify the person removing the invite is the tournament admin
-		if tournament.admin != admin:
-			raise ValidationError("You can't remove invites unless you're the admin.")
-
-		invites = TournamentInvite.objects.find_pending_invites(
-			send_to_user_id=uninvite_user.id,
-			tournament_id=tournament_id
-		)
-
-		if len(invites) == 0:
-			raise ValidationError("That player does not have an invition to this tournament.")
-
-		# There should only be one, but just in case we'll loop
-		for invite in invites:
-			invite.delete()
-
-		# Delete the TournamentPlayer
-		player = TournamentPlayer.objects.get_tournament_player_by_user_id(
-			tournament_id = tournament.id,
-			user_id = uninvite_user.id
-		)
-		player.delete()
-
-		return uninvite_user
-
-
-	# Return a queryset containing any pending invites for a user and a tournament.
-	def find_pending_invites(self, send_to_user_id, tournament_id):
-		send_to = User.objects.get_by_id(send_to_user_id)
-		tournament = Tournament.objects.get_by_id(tournament_id)
-		invites = super().get_queryset().filter(send_to=send_to, tournament=tournament)
-		return invites
-
-	def find_pending_invites_for_user(self, send_to_user_id):
-		send_to = User.objects.get_by_id(send_to_user_id)
-		invites = super().get_queryset().filter(send_to=send_to)
-		return invites
-
-	def find_pending_invites_for_tournament(self, tournament_id):
-		tournament = Tournament.objects.get_by_id(tournament_id)
-		invites = super().get_queryset().filter(tournament=tournament)
-		return invites
-
-class TournamentInvite(models.Model):
-	send_to 					= models.ForeignKey(User, on_delete=models.CASCADE)
-	tournament 				= models.ForeignKey(Tournament, on_delete=models.CASCADE)
-
-	objects = TournamentInviteManager()
-
-	def __str__(self):
-		return f"Invite for tournament {self.tournament.title} sent to {self.send_to.username}."
-
-
 
 class TournamentEliminationManager(models.Manager):
 	def get_eliminations_by_tournament(self, tournament_id):
@@ -1586,23 +1413,25 @@ class TournamentPlayerResultManager(models.Manager):
 			# If they didn't come first, figure out what they placed.
 			# This queryset is ordered from (last elim) -> (first elim)
 			all_eliminations = TournamentElimination.objects.get_eliminations_by_tournament(tournament_id)
-			# {user_id, timestamp of elimination}
-			elimations_dict = {} 
+			# {player_id: (eliminated_at, elimination_id)} - id used as tiebreaker for same-timestamp eliminations
+			elimations_dict = {}
 			for elimination in all_eliminations:
+				entry = (elimination.eliminated_at, elimination.id)
 				if elimination.eliminatee.id not in elimations_dict.keys():
-					elimations_dict[elimination.eliminatee.id] = elimination.eliminated_at
-				elif elimination.eliminated_at > elimations_dict[elimination.eliminatee.id]:
+					elimations_dict[elimination.eliminatee.id] = entry
+				elif entry > elimations_dict[elimination.eliminatee.id]:
 					# Only replace the value in the dictionary if the timestamp is newer (more recent)
-					elimations_dict[elimination.eliminatee.id] = elimination.eliminated_at
+					elimations_dict[elimination.eliminatee.id] = entry
 			tournament_split_eliminations = TournamentSplitElimination.objects.get_split_eliminations_by_tournament(
 				tournament_id = tournament.id
 			)
 			for split_elimination in tournament_split_eliminations:
+				entry = (split_elimination.eliminated_at, split_elimination.id)
 				if split_elimination.eliminatee.id not in elimations_dict.keys():
-					elimations_dict[split_elimination.eliminatee.id] = split_elimination.eliminated_at
-				elif split_elimination.eliminated_at > elimations_dict[split_elimination.eliminatee.id]:
+					elimations_dict[split_elimination.eliminatee.id] = entry
+				elif entry > elimations_dict[split_elimination.eliminatee.id]:
 					# Only replace the value in the dictionary if the timestamp is newer (more recent)
-					elimations_dict[split_elimination.eliminatee.id] = split_elimination.eliminated_at
+					elimations_dict[split_elimination.eliminatee.id] = entry
 
 			# Loop through the sorted list. Whatever index this player is in, thats what they placed
 			sorted_reversed_list = [k for k, v in sorted(elimations_dict.items(), key=lambda p: p[1], reverse=True)]

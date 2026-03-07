@@ -5,7 +5,6 @@ from .models import (
     Tournament,
     TournamentPlayer,
     TournamentElimination,
-    TournamentInvite,
     TournamentPlayerResult,
     TournamentRebuy,
     TournamentSplitElimination
@@ -46,17 +45,6 @@ class TournamentPlayerAdmin(admin.ModelAdmin):
 
 
 admin.site.register(TournamentPlayer, TournamentPlayerAdmin)
-
-class TournamentInviteAdmin(admin.ModelAdmin):
-    fieldsets = (
-        (None, {'fields': ('send_to', 'tournament')}),
-    )
-
-    list_display = ('send_to', 'tournament')
-    search_fields = ('send_to', 'tournament' )
-
-
-admin.site.register(TournamentInvite, TournamentInviteAdmin)
 
 class TournamentEliminationAdmin(admin.ModelAdmin):
     fieldsets = (

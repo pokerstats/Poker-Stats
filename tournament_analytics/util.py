@@ -1,5 +1,6 @@
 from collections import defaultdict
 from django.contrib.humanize.templatetags.humanize import naturalday
+from django.core.cache import cache
 from django.utils import timezone
 from decimal import Decimal
 import json
@@ -199,3 +200,31 @@ def build_rebuys_and_eliminations_data(players):
 			'completed_at': naturalday(player.tournament.completed_at),
 		}
 	return json.dumps(result_dict)
+
+
+def build_all_chart_data(user_id):
+	from tournament_analytics.models import TournamentTotals
+	from tournament.models import TournamentPlayer
+
+	tournament_totals = TournamentTotals.objects.get_or_build_tournament_totals_by_user_id(user_id=user_id)
+	tournament_totals_sorted = sorted(tournament_totals, key=lambda x: x.timestamp)
+
+	cache_key = None
+	if tournament_totals_sorted:
+		rebuild_hash = tournament_totals_sorted[-1].rebuild_hash
+		cache_key = f"analytics_{user_id}_{rebuild_hash}"
+		cached = cache.get(cache_key)
+		if cached is not None:
+			return cached
+
+	tournament_players = TournamentPlayer.objects.get_all_tournament_players_by_user_id(user_id)
+	data = {
+		'tournament_totals': build_json_from_tournament_totals_data(tournament_totals_sorted),
+		'tournament_player_results': build_tournament_player_result_data(tournament_players),
+		'eliminations': build_player_eliminations_data(tournament_players),
+		'rebuys_and_eliminations': build_rebuys_and_eliminations_data(tournament_players),
+	}
+
+	if cache_key:
+		cache.set(cache_key, data, timeout=None)
+	return data

@@ -8,12 +8,21 @@ from django.http import JsonResponse
 import json
 from tournament.models import TournamentPlayer
 from tournament_analytics.models import TournamentTotals
+from tournament_group.models import TournamentGroup
 from tournament_analytics.util import (
 	build_json_from_tournament_totals_data,
 	build_tournament_player_result_data,
 	build_player_eliminations_data,
 	build_rebuys_and_eliminations_data
 )
+
+@login_required
+def stats_view(request, *args, **kwargs):
+	context = {}
+	tournament_groups = TournamentGroup.objects.get_tournament_groups(user_id=request.user.id)
+	if len(tournament_groups) > 0:
+		context['tournament_groups'] = tournament_groups
+	return render(request=request, template_name='tournament_analytics/stats.html', context=context)
 
 """
 Request for retrieving the TournamentTotals data for a user.

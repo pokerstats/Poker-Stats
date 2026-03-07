@@ -24,6 +24,25 @@ def stats_view(request, *args, **kwargs):
 		context['tournament_groups'] = tournament_groups
 	return render(request=request, template_name='tournament_analytics/stats.html', context=context)
 
+@login_required
+def fetch_all_analytics_data(request, *args, **kwargs):
+	context = {}
+	try:
+		user_id = kwargs['user_id']
+
+		tournament_totals = TournamentTotals.objects.get_or_build_tournament_totals_by_user_id(user_id=user_id)
+		tournament_totals = sorted(tournament_totals, key=lambda x: x.timestamp, reverse=False)
+		context['tournament_totals'] = build_json_from_tournament_totals_data(tournament_totals)
+
+		tournament_players = TournamentPlayer.objects.get_all_tournament_players_by_user_id(user_id)
+		context['tournament_player_results'] = build_tournament_player_result_data(tournament_players)
+		context['eliminations'] = build_player_eliminations_data(tournament_players)
+		context['rebuys_and_eliminations'] = build_rebuys_and_eliminations_data(tournament_players)
+
+	except Exception as e:
+		return JsonResponse({'error': 'Unable to retrieve analytics data.', 'message': f'{e.args[0]}'}, status=200)
+	return JsonResponse(context, status=200)
+
 """
 Request for retrieving the TournamentTotals data for a user.
 """

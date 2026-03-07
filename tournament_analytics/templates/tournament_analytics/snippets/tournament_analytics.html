@@ -63,17 +63,8 @@
 {% endif %}
 
 
-<!-- Hidden field with fetch tournament totals url -->
-<input class="d-none" id="id_hidden_fetch_tournament_totals_url" value="{% url 'tournament_analytics:fetch_tournament_totals_data' user_id=request.user.id %}">
-
-<!-- Hidden field with fetch tournament player results url -->
-<input class="d-none" id="id_hidden_fetch_tournament_player_result_url" value="{% url 'tournament_analytics:fetch_tournament_player_results_data' user_id=request.user.id %}">
-
-<!-- Hidden field with fetch eliminations url -->
-<input class="d-none" id="id_hidden_fetch_eliminations_url" value="{% url 'tournament_analytics:fetch_tournament_player_eliminations_data' user_id=request.user.id %}">
-
-<!-- Hidden field with fetch rebuys and eliminations url -->
-<input class="d-none" id="id_hidden_fetch_rebuys_and_eliminations_url" value="{% url 'tournament_analytics:fetch_tournament_eliminations_and_rebuys_data' user_id=request.user.id %}">
+<!-- Hidden field with combined analytics fetch url -->
+<input class="d-none" id="id_hidden_fetch_all_analytics_url" value="{% url 'tournament_analytics:fetch_all_analytics_data' user_id=request.user.id %}">
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -243,6 +234,29 @@
 
 </script>
 
+<!-- Combined analytics fetch -->
+<script>
+	function generateAllAnalyticsData() {
+		const url = document.getElementById("id_hidden_fetch_all_analytics_url").value
+		fetch(url)
+			.then((response) => response.json())
+			.then((data) => {
+				if (data.error != null) {
+					onError(data.error, data.message)
+					return
+				}
+				processTournamentTotalsData(data)
+				processRebuysAndEliminationsData(data)
+				processTournamentPlayerResultData(data)
+				processEliminationsData(data)
+			}).catch((error) => {
+				onError(error.name, error.message)
+			});
+	}
+
+	generateAllAnalyticsData()
+</script>
+
 <!-- Net earnings and losses -->
 <script>
 	const netEarningsVsLossesContext = document.getElementById('netEarningsVsLossesChartId');
@@ -251,45 +265,25 @@
 	var losses_data = []
 	var gross_earnings_data = []
 
-	function generateTournamentTotalsData() {
-		const tournamentTotalsUrl = document.getElementById("id_hidden_fetch_tournament_totals_url").value
-		fetch(tournamentTotalsUrl)
-			.then((response) => {
-				return response.json()
-			})
-			.then((data) => {
-				if (data.error != null) {
-					onError(data.error, data.message)
-				} else {
-					totals_data = [];
-					const json = JSON.parse(data.tournament_totals)
-					for (var key in json) {
-						var total_data = json[key]
-
-						var timestamp = total_data.timestamp
-						netEarningsAndLossesLabels.push(timestamp)
-
-						var net_earnings = total_data.net_earnings
-						net_earnings_data.push(net_earnings)
-
-						var losses = total_data.losses
-						losses_data.push(losses)
-
-						var gross_earnings = total_data.gross_earnings
-						gross_earnings_data.push(gross_earnings)
-					}
-					if (netEarningsAndLossesLabels.length > 1) {
-						buildTournamentTotalsChart()
-					} else {
-						showNotEnoughDataWarning()
-					}
-				}
-			}).catch((error) => {
-				onError(error.name, error.message)
-			});
+	function processTournamentTotalsData(data) {
+		netEarningsAndLossesLabels = [];
+		net_earnings_data = []
+		losses_data = []
+		gross_earnings_data = []
+		const json = JSON.parse(data.tournament_totals)
+		for (var key in json) {
+			var total_data = json[key]
+			netEarningsAndLossesLabels.push(total_data.timestamp)
+			net_earnings_data.push(total_data.net_earnings)
+			losses_data.push(total_data.losses)
+			gross_earnings_data.push(total_data.gross_earnings)
+		}
+		if (netEarningsAndLossesLabels.length > 1) {
+			buildTournamentTotalsChart()
+		} else {
+			showNotEnoughDataWarning()
+		}
 	}
-
-	generateTournamentTotalsData()
 
 	function buildTournamentTotalsChart() {
 		const netEarningsAndLossesData = {
@@ -370,38 +364,18 @@
 	var eliminations_data = []
 	var rebuys_data = []
 
-	function generateRebuysAndEliminationsData() {
-		const eliminationsAndRebuysUrl = document.getElementById("id_hidden_fetch_rebuys_and_eliminations_url").value
-		fetch(eliminationsAndRebuysUrl)
-			.then((response) => {
-				return response.json()
-			})
-			.then((data) => {
-				if (data.error != null) {
-					onError(data.error, data.message)
-				} else {
-					eliminationsAndRebuysLabels = []
-					eliminations_data = []
-					rebuys_data = []
-					const json = JSON.parse(data.rebuys_and_eliminations)
-					for (var key in json) {
-						var timestamp = json[key].completed_at
-						eliminationsAndRebuysLabels.push(timestamp)
-
-						var eliminations = json[key].eliminations
-						eliminations_data.push(eliminations)
-
-						var rebuys = json[key].rebuys
-						rebuys_data.push(rebuys)
-					}
-					buildRebuysAndEliminationsChart()
-				}
-			}).catch((error) => {
-				onError(error.name, error.message)
-			});
+	function processRebuysAndEliminationsData(data) {
+		eliminationsAndRebuysLabels = []
+		eliminations_data = []
+		rebuys_data = []
+		const json = JSON.parse(data.rebuys_and_eliminations)
+		for (var key in json) {
+			eliminationsAndRebuysLabels.push(json[key].completed_at)
+			eliminations_data.push(json[key].eliminations)
+			rebuys_data.push(json[key].rebuys)
+		}
+		buildRebuysAndEliminationsChart()
 	}
-
-	generateRebuysAndEliminationsData()
 
 	function buildRebuysAndEliminationsChart() {
 		const eliminationsAndRebuysData = {
@@ -462,68 +436,34 @@
 	var mouseX = 0;
 	var mouseY = 0;
 
-	function generateTournamentPlayerResultData() {
-		const tournamentResultsUrl = document.getElementById("id_hidden_fetch_tournament_player_result_url").value
-		fetch(tournamentResultsUrl)
-			.then((response) => {
-				return response.json()
-			})
-			.then((data) => {
-				if (data.error != null) {
-					onError(data.error, data.message)
-				} else {
-					rawTournamentPlayerResultLabels = []
-					tournamentPlayerResultCompletedAtDates = []
-					tournamentPlayerResultsLabels = [];
-					tournament_placements_data = []
-					tournament_net_earnings_data = []
-					tournament_gross_earnings_data = []
-					tournament_losses_data = []
-					tournament_result_eliminations_data = []
-					tournament_result_rebuys_data = []
+	function processTournamentPlayerResultData(data) {
+		rawTournamentPlayerResultLabels = []
+		tournamentPlayerResultCompletedAtDates = []
+		tournamentPlayerResultsLabels = [];
+		tournament_placements_data = []
+		tournament_net_earnings_data = []
+		tournament_gross_earnings_data = []
+		tournament_losses_data = []
+		tournament_result_eliminations_data = []
+		tournament_result_rebuys_data = []
 
-					const json = JSON.parse(data.tournament_player_results)
-					var counter = 0
-					for (var key in json) {
-						var result_data = json[key]
-
-						var complatedAt = result_data.completed_at
-						tournamentPlayerResultCompletedAtDates.push(complatedAt)
-
-						var shortTitle = "T" + counter
-						tournamentPlayerResultsLabels.push(shortTitle)
-
-						var title = result_data.tournament_title
-						rawTournamentPlayerResultLabels.push(title)
-
-						var placement = result_data.placement
-						tournament_placements_data.push(placement)
-
-						var netEarnings = result_data.net_earnings
-						tournament_net_earnings_data.push(netEarnings)
-
-						var grossEarnings = result_data.gross_earnings
-						tournament_gross_earnings_data.push(grossEarnings)
-
-						var losses = result_data.losses
-						tournament_losses_data.push(losses)
-
-						var eliminations = result_data.eliminations
-						tournament_result_eliminations_data.push(eliminations)
-
-						var rebuys = result_data.rebuys
-						tournament_result_rebuys_data.push(rebuys)
-
-						counter += 1;
-					}
-					buildTournamentPlayerResultChart()
-				}
-			}).catch((error) => {
-				onError(error.name, error.message)
-			});
+		const json = JSON.parse(data.tournament_player_results)
+		var counter = 0
+		for (var key in json) {
+			var result_data = json[key]
+			tournamentPlayerResultCompletedAtDates.push(result_data.completed_at)
+			tournamentPlayerResultsLabels.push("T" + counter)
+			rawTournamentPlayerResultLabels.push(result_data.tournament_title)
+			tournament_placements_data.push(result_data.placement)
+			tournament_net_earnings_data.push(result_data.net_earnings)
+			tournament_gross_earnings_data.push(result_data.gross_earnings)
+			tournament_losses_data.push(result_data.losses)
+			tournament_result_eliminations_data.push(result_data.eliminations)
+			tournament_result_rebuys_data.push(result_data.rebuys)
+			counter += 1;
+		}
+		buildTournamentPlayerResultChart()
 	}
-
-	generateTournamentPlayerResultData()
 
 	function buildTournamentPlayerResultChart() {
 		const tournamentPlayerResultsData = {
@@ -747,42 +687,20 @@
 	var elimination_count_data = []
 	var elimination_colors_data = []
 
-	function generateEliminationsData() {
-		const eliminationsUrl = document.getElementById("id_hidden_fetch_eliminations_url").value
-		fetch(eliminationsUrl)
-			.then((response) => {
-				return response.json()
-			})
-			.then((data) => {
-				if (data.error != null) {
-					onError(data.error, data.message)
-				} else {
-					username_small_data = []
-					usernames_data = []
-					elimination_count_data = []
-					elimination_colors_data = []
-					const json = JSON.parse(data.eliminations)
-					for (var key in json) {
-						var short_username = json[key].short_username
-						username_small_data.push(short_username)
-
-						var username = json[key].username
-						usernames_data.push(username)
-
-						var count = json[key].count
-						elimination_count_data.push(count)
-
-						var color = json[key].color
-						elimination_colors_data.push(color)
-					}
-					buildEliminationsChart()
-				}
-			}).catch((error) => {
-				onError(error.name, error.message)
-			});
+	function processEliminationsData(data) {
+		username_small_data = []
+		usernames_data = []
+		elimination_count_data = []
+		elimination_colors_data = []
+		const json = JSON.parse(data.eliminations)
+		for (var key in json) {
+			username_small_data.push(json[key].short_username)
+			usernames_data.push(json[key].username)
+			elimination_count_data.push(json[key].count)
+			elimination_colors_data.push(json[key].color)
+		}
+		buildEliminationsChart()
 	}
-
-	generateEliminationsData()
 
 	function buildEliminationsChart() {
 		const eliminationsData = {

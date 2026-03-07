@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+
+{% block head_title %}Stats{% endblock %}
+
+{% block content %}
+
+{% include 'tournament_analytics/snippets/tournament_analytics.html' with tournament_groups=tournament_groups %}
+
+{% endblock content %}

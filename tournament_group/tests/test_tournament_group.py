@@ -308,3 +308,21 @@ class TournamentGroupTestCase(TestCase):
 		# bird has no tournaments anywhere — sees nothing
 		bird_groups = TournamentGroup.objects.get_tournament_groups(user_id=bird.id)
 		self.assertEqual(len(bird_groups), 0)
+
+	"""
+	Admin should see their group even if it has no tournaments yet.
+	"""
+	def test_get_tournament_groups_returns_empty_group_for_admin(self):
+		cat = User.objects.get_by_username("cat")
+		dog = User.objects.get_by_username("dog")
+
+		empty_group = self.create_tournament_group(admin=cat, title="Empty Group")
+
+		# cat is admin — should see the group even with no tournaments
+		cat_groups = TournamentGroup.objects.get_tournament_groups(user_id=cat.id)
+		self.assertEqual(len(cat_groups), 1)
+		self.assertEqual(cat_groups[0], empty_group)
+
+		# dog is not admin and not a player — should see nothing
+		dog_groups = TournamentGroup.objects.get_tournament_groups(user_id=dog.id)
+		self.assertEqual(len(dog_groups), 0)

@@ -63,9 +63,6 @@
 {% endif %}
 
 
-<!-- Hidden field with combined analytics fetch url -->
-<input class="d-none" id="id_hidden_fetch_all_analytics_url" value="{% url 'tournament_analytics:fetch_all_analytics_data' user_id=request.user.id %}">
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <!-- Common -->
@@ -232,29 +229,6 @@
 		document.getElementById("id_tournament_complete_spinner").classList.add("d-none")
 	}
 
-</script>
-
-<!-- Combined analytics fetch -->
-<script>
-	function generateAllAnalyticsData() {
-		const url = document.getElementById("id_hidden_fetch_all_analytics_url").value
-		fetch(url)
-			.then((response) => response.json())
-			.then((data) => {
-				if (data.error != null) {
-					onError(data.error, data.message)
-					return
-				}
-				processTournamentTotalsData(data)
-				processRebuysAndEliminationsData(data)
-				processTournamentPlayerResultData(data)
-				processEliminationsData(data)
-			}).catch((error) => {
-				onError(error.name, error.message)
-			});
-	}
-
-	generateAllAnalyticsData()
 </script>
 
 <!-- Net earnings and losses -->
@@ -680,6 +654,7 @@
 
 
 <!-- Player eliminations count -->
+
 <script type="text/javascript">
 	const eliminationsContext = document.getElementById('eliminationsChartId');
 	var username_small_data = []
@@ -744,6 +719,15 @@
 
 		setEliminationsChartSize()
 	}
+</script>
+
+{{ analytics_data|json_script:"id_analytics_data" }}
+<script>
+	const analyticsData = JSON.parse(document.getElementById('id_analytics_data').textContent);
+	processTournamentTotalsData(analyticsData);
+	processRebuysAndEliminationsData(analyticsData);
+	processTournamentPlayerResultData(analyticsData);
+	processEliminationsData(analyticsData);
 </script>
 
 <style type="text/css">

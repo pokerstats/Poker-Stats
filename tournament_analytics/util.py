@@ -1,3 +1,4 @@
+from collections import defaultdict
 from django.contrib.humanize.templatetags.humanize import naturalday
 from django.utils import timezone
 from decimal import Decimal
@@ -28,42 +29,62 @@ def build_json_from_tournament_totals_data(list_of_tournament_totals):
 Build json of TournamentPlayerResult data for each tournament.
 """
 def build_tournament_player_result_data(players):
-	# Sort from oldest tournament to newest
-	tournament_players = sorted(
-		players,
-		key=lambda x: get_value_or_default(x.tournament.completed_at, timezone.now()),reverse=False
+	completed_players = [p for p in players if p.tournament.completed_at is not None]
+	if not completed_players:
+		return json.dumps({})
+
+	player_ids = [p.id for p in completed_players]
+	player_id_set = set(player_ids)
+
+	# Bulk fetch all needed data in 4 queries instead of 4N
+	results_by_player = {
+		r.player_id: r
+		for r in TournamentPlayerResult.objects.filter(
+			player_id__in=player_ids
+		).select_related('tournament', 'player')
+	}
+
+	eliminations_by_player = defaultdict(list)
+	for e in TournamentElimination.objects.filter(eliminator_id__in=player_ids):
+		eliminations_by_player[e.eliminator_id].append(e)
+
+	split_elims_by_player = defaultdict(list)
+	for se in TournamentSplitElimination.objects.filter(
+		eliminators__in=player_ids
+	).prefetch_related('eliminators').distinct():
+		for elim in se.eliminators.all():
+			if elim.id in player_id_set:
+				split_elims_by_player[elim.id].append(se)
+
+	rebuys_by_player = defaultdict(list)
+	for r in TournamentRebuy.objects.filter(player_id__in=player_ids):
+		rebuys_by_player[r.player_id].append(r)
+
+	completed_players_sorted = sorted(
+		completed_players,
+		key=lambda x: get_value_or_default(x.tournament.completed_at, timezone.now()),
+		reverse=False
 	)
-	tournament_players_result_dict = {}
-	for player in tournament_players:
-		if player.tournament.completed_at != None:
-			result = TournamentPlayerResult.objects.get_results_for_user_by_tournament(
-				tournament_id = player.tournament.id,
-				user_id = player.user.id
-			)[0]
-			eliminations = TournamentElimination.objects.get_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			split_eliminations = TournamentSplitElimination.objects.get_split_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			split_eliminations_count = 0
-			for split_elimination in split_eliminations:
-				eliminators = split_elimination.eliminators.all()
-				split_eliminations_count += 1.00 / len(eliminators)
-			rebuys = TournamentRebuy.objects.get_rebuys_for_player(
-				player = player
-			)
-			tournament_players_result_dict[f"{player.tournament.completed_at}"] = {
+
+	result_dict = {}
+	for player in completed_players_sorted:
+		result = results_by_player.get(player.id)
+		if result:
+			eliminations = eliminations_by_player[player.id]
+			split_elims = split_elims_by_player[player.id]
+			split_count = sum(1.0 / len(se.eliminators.all()) for se in split_elims)
+			rebuys = rebuys_by_player[player.id]
+			result_dict[f"{player.tournament.completed_at}"] = {
 				'placement': result.placement,
 				'net_earnings': f"{result.net_earnings}",
 				'gross_earnings': f"{result.gross_earnings}",
 				'tournament_title': result.tournament.title,
 				'completed_at': naturalday(result.tournament.completed_at),
-				'eliminations': f"{round(Decimal(len(eliminations) + split_eliminations_count), 2)}",
+				'eliminations': f"{round(Decimal(len(eliminations) + split_count), 2)}",
 				'rebuys': len(rebuys),
 				'losses': f"{result.investment}",
 			}
-	return json.dumps(tournament_players_result_dict)
+	return json.dumps(result_dict)
 
 """
 Build json of eliminations on per-user basis. In otherwords, how many times you eliminated each player.
@@ -85,49 +106,42 @@ The json object also contains a color for each player they eliminatied. This is 
 ]
 """
 def build_player_eliminations_data(players):
-	eliminations_dict = {}
-	for player in players:
-		if player.tournament.completed_at != None:
-			# Get all the eliminations where this player was the eliminator
-			eliminations = TournamentElimination.objects.get_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			for elimination in eliminations:
-				if f"{elimination.eliminatee.user.username}" in eliminations_dict:
-					eliminations_dict[f"{elimination.eliminatee.user.username}"] += 1
-				else:
-					eliminations_dict[f"{elimination.eliminatee.user.username}"] = 1
+	completed_players = [p for p in players if p.tournament.completed_at is not None]
+	if not completed_players:
+		return json.dumps([])
 
-			# Get all the split eliminations where this player was one of the eliminators
-			split_eliminations = TournamentSplitElimination.objects.get_split_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			split_eliminations_count = 0
-			for split_elimination in split_eliminations:
-				split_eliminations_count += 1.00 / len(split_elimination.eliminators.all())
-				if f"{split_elimination.eliminatee.user.username}" in eliminations_dict:
-					eliminations_dict[f"{split_elimination.eliminatee.user.username}"] += split_eliminations_count
-				else:
-					eliminations_dict[f"{split_elimination.eliminatee.user.username}"] = split_eliminations_count
+	player_ids = [p.id for p in completed_players]
+	player_id_set = set(player_ids)
+
+	eliminations_dict = {}
+
+	# Bulk fetch regular eliminations
+	for e in TournamentElimination.objects.filter(
+		eliminator_id__in=player_ids
+	).select_related('eliminatee__user'):
+		username = e.eliminatee.user.username
+		eliminations_dict[username] = eliminations_dict.get(username, 0) + 1
+
+	# Bulk fetch split eliminations
+	for se in TournamentSplitElimination.objects.filter(
+		eliminators__in=player_ids
+	).prefetch_related('eliminators').select_related('eliminatee__user').distinct():
+		eliminator_count = len(se.eliminators.all())
+		username = se.eliminatee.user.username
+		eliminations_dict[username] = eliminations_dict.get(username, 0) + (1.0 / eliminator_count)
 
 	eliminations = []
-	for username_key in eliminations_dict.keys():
-		elim_count = eliminations_dict[username_key]
+	for username, count in eliminations_dict.items():
 		color_list = list(random.choices(range(256), k=3))
 		color = f"rgb({color_list[0]}, {color_list[1]}, {color_list[2]})"
-		item = {
-			'username': username_key,
-			'short_username': shorten_string(username_key, 15),
-			'count': elim_count,
-			'color': color
-		}
-		eliminations.append(item)
+		eliminations.append({
+			'username': username,
+			'short_username': shorten_string(username, 15),
+			'count': count,
+			'color': color,
+		})
 
-	eliminations = sorted(
-		eliminations,
-		key = lambda x: x['count'],
-		reverse = True
-	)
+	eliminations.sort(key=lambda x: x['count'], reverse=True)
 	return json.dumps(eliminations)
 
 
@@ -142,49 +156,46 @@ Build a dictionary of the rebuys, eliminations and split eliminations data.
 
 """
 def build_rebuys_and_eliminations_data(players):
-	# Sort from oldest tournament to newest
-	tournament_players = sorted(
-		players,
-		key=lambda x: get_value_or_default(x.tournament.completed_at, timezone.now()),reverse=False
+	completed_players = [p for p in players if p.tournament.completed_at is not None]
+	if not completed_players:
+		return json.dumps({})
+
+	player_ids = [p.id for p in completed_players]
+	player_id_set = set(player_ids)
+
+	# Bulk fetch all needed data in 3 queries instead of 3N
+	eliminations_by_player = defaultdict(list)
+	for e in TournamentElimination.objects.filter(eliminator_id__in=player_ids):
+		eliminations_by_player[e.eliminator_id].append(e)
+
+	split_elims_by_player = defaultdict(list)
+	for se in TournamentSplitElimination.objects.filter(
+		eliminators__in=player_ids
+	).prefetch_related('eliminators').distinct():
+		for elim in se.eliminators.all():
+			if elim.id in player_id_set:
+				split_elims_by_player[elim.id].append(se)
+
+	rebuys_by_player = defaultdict(list)
+	for r in TournamentRebuy.objects.filter(player_id__in=player_ids):
+		rebuys_by_player[r.player_id].append(r)
+
+	completed_players_sorted = sorted(
+		completed_players,
+		key=lambda x: get_value_or_default(x.tournament.completed_at, timezone.now()),
+		reverse=False
 	)
-	rebuys_and_eliminations_dict = {}
-	for player in tournament_players:
-		if player.tournament.completed_at != None:
-			eliminations = TournamentElimination.objects.get_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			split_eliminations = TournamentSplitElimination.objects.get_split_eliminations_by_eliminator(
-				player_id = player.id
-			)
-			split_eliminations_count = 0
-			for split_elimination in split_eliminations:
-				eliminators = split_elimination.eliminators.all()
-				split_eliminations_count += 1.00 / len(eliminators)
-			rebuys = TournamentRebuy.objects.get_rebuys_for_player(
-				player = player
-			)
-			rebuys_and_eliminations_dict[f"{player.tournament.completed_at}"] = {
-				'eliminations': f"{round(Decimal(len(eliminations) + split_eliminations_count), 2)}",
-				'rebuys': len(rebuys),
-				'tournament_title': player.tournament.title,
-				'completed_at': naturalday(player.tournament.completed_at)
-			}
-	return json.dumps(rebuys_and_eliminations_dict)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	result_dict = {}
+	for player in completed_players_sorted:
+		eliminations = eliminations_by_player[player.id]
+		split_elims = split_elims_by_player[player.id]
+		split_count = sum(1.0 / len(se.eliminators.all()) for se in split_elims)
+		rebuys = rebuys_by_player[player.id]
+		result_dict[f"{player.tournament.completed_at}"] = {
+			'eliminations': f"{round(Decimal(len(eliminations) + split_count), 2)}",
+			'rebuys': len(rebuys),
+			'tournament_title': player.tournament.title,
+			'completed_at': naturalday(player.tournament.completed_at),
+		}
+	return json.dumps(result_dict)

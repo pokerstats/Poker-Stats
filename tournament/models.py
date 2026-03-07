@@ -849,8 +849,7 @@ class TournamentPlayerManager(models.Manager):
 	"""
 	def get_all_tournament_players_by_user_id(self, user_id):
 		user = User.objects.get_by_id(user_id)
-		players = super().get_queryset().filter(user=user)
-		return players
+		return super().get_queryset().filter(user=user).select_related('tournament', 'user')
 
 	"""
 	Get TournamentPlayer by pk.

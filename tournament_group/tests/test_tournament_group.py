@@ -1,5 +1,5 @@
 from django.core.exceptions import ValidationError
-from django.test import TransactionTestCase
+from django.test import TestCase
 
 from tournament.models import (
 	Tournament
@@ -19,10 +19,7 @@ from user.test_util import (
 	build_user
 )
 
-class TournamentGroupTestCase(TransactionTestCase):
-
-	# Reset primary keys after each test function run
-	reset_sequences = True
+class TournamentGroupTestCase(TestCase):
 
 	def setUp(self):
 		# Build some users for the tests

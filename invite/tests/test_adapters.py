@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.test import TransactionTestCase, RequestFactory
+from django.test import TestCase, RequestFactory
 from django.contrib.sessions.backends.db import SessionStore
 from django.utils import timezone
 
@@ -19,8 +19,7 @@ def make_request_with_session(session_data=None):
     return request
 
 
-class InviteAccountAdapterTestCase(TransactionTestCase):
-    reset_sequences = True
+class InviteAccountAdapterTestCase(TestCase):
 
     def setUp(self):
         self.adapter = InviteAccountAdapter()
@@ -59,8 +58,7 @@ class InviteAccountAdapterTestCase(TransactionTestCase):
         self.assertFalse(self.adapter.is_open_for_signup(request))
 
 
-class InviteSocialAccountAdapterTestCase(TransactionTestCase):
-    reset_sequences = True
+class InviteSocialAccountAdapterTestCase(TestCase):
 
     def setUp(self):
         self.adapter = InviteSocialAccountAdapter()

@@ -1,14 +1,13 @@
 from datetime import timedelta
 
-from django.test import TransactionTestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from invite.models import Invite
 from user.test_util import build_user
 
 
-class InviteIsValidTestCase(TransactionTestCase):
-    reset_sequences = True
+class InviteIsValidTestCase(TestCase):
 
     def setUp(self):
         self.staff = build_user('staff')
@@ -43,8 +42,7 @@ class InviteIsValidTestCase(TransactionTestCase):
         self.assertFalse(invite.is_valid)
 
 
-class InviteManagerTestCase(TransactionTestCase):
-    reset_sequences = True
+class InviteManagerTestCase(TestCase):
 
     def setUp(self):
         self.staff = build_user('staff')

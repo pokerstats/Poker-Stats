@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.test import TransactionTestCase, Client
+from django.test import TestCase, Client
 from django.urls import reverse
 from django.utils import timezone
 
@@ -8,8 +8,7 @@ from invite.models import Invite
 from user.test_util import build_user
 
 
-class AcceptInviteViewTestCase(TransactionTestCase):
-    reset_sequences = True
+class AcceptInviteViewTestCase(TestCase):
 
     def setUp(self):
         self.client = Client()
@@ -62,8 +61,7 @@ class AcceptInviteViewTestCase(TransactionTestCase):
         self.assertIsNone(self.client.session.get('invite_token'))
 
 
-class InviteManagementViewTestCase(TransactionTestCase):
-    reset_sequences = True
+class InviteManagementViewTestCase(TestCase):
 
     def setUp(self):
         self.client = Client()
@@ -99,8 +97,7 @@ class InviteManagementViewTestCase(TransactionTestCase):
         self.assertEqual(invite.created_by, self.staff)
 
 
-class DeleteInviteViewTestCase(TransactionTestCase):
-    reset_sequences = True
+class DeleteInviteViewTestCase(TestCase):
 
     def setUp(self):
         self.client = Client()

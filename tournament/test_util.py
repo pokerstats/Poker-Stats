@@ -10,6 +10,7 @@ A utility data holder class that makes testing TournamentPlayerResults easier.
 @dataclass
 class PlayerPlacementData:
 	user_id: int
+	username: str
 	placement: int
 	placement_earnings: str
 	gross_earnings: str

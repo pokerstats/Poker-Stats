@@ -13,7 +13,6 @@ from tournament.models import (
 	Tournament,
 	TournamentStructure,
 	TournamentState,
-	TournamentInvite,
 	TournamentPlayer,
 	TournamentElimination,
 	TournamentPlayerResult,
@@ -70,23 +69,18 @@ def tournament_list_view(request, *args, **kwargs):
 		# The tournament where they are the admin
 		context['tournaments'] = Tournament.objects.get_by_user(
 			user=request.user
-		).order_by("started_at")
+		).order_by("-started_at")
 
 		# The tournaments they have joined (with accepted invite) but are not admin
 		joined_tournaments = Tournament.objects.get_joined_tournaments(
 			user_id = request.user.id
 		)
 		joined_tournaments.sort(
-			key=get_tournament_started_at
+			key=get_tournament_started_at,
+			reverse=True
 		)
-		
-		context['joined_tournaments'] = joined_tournaments
 
-		# pending invites
-		invites = TournamentInvite.objects.find_pending_invites_for_user(
-			send_to_user_id = request.user.id
-		)
-		context['invites'] = invites
+		context['joined_tournaments'] = joined_tournaments
 
 	except Exception as e:
 		messages.error(request, e.args[0])
@@ -179,54 +173,6 @@ def undo_started_at(request, *args, **kwargs):
 	return redirect("tournament:tournament_view", pk=tournament_id)
 
 """
-Join a Tournament given a TournamentInvite.
-kwargs['id'] is the id of the TournamentInvite.
-"""
-@login_required
-def join_tournament(request, *args, **kwargs):
-	user = request.user
-	try:
-		invite = TournamentInvite.objects.get(pk=kwargs['pk'])
-		if invite.send_to != user:
-			messages.error(request, "That invitation wasn't for you.")
-			return redirect("home")
-
-		# Get the player and join the Tournament.
-		player = TournamentPlayer.objects.get_tournament_player_by_user_id(
-			tournament_id = invite.tournament.id,
-			user_id = invite.send_to.id
-		)
-		TournamentPlayer.objects.join_tournament(
-			player = player
-		)
-		messages.success(request, f"Joined {player.tournament.title}.")
-		# return redirect("tournament:tournament_view", pk=invite.tournament.id)
-	except Exception as e:
-		messages.error(request, e.args[0])
-	return redirect(request.META['HTTP_REFERER'])
-
-"""
-Uninvite a player from a tournament.
-HTMX request for tournament_view
-"""
-@login_required
-def uninvite_player_from_tournament(request, *args, **kwargs):
-	user = request.user
-	player_id = kwargs['player_id']
-	tournament_id = kwargs['tournament_id']
-	try:
-		uninvited_user = TournamentInvite.objects.uninvite_player_from_tournament(
-			admin_id = user.id,
-			uninvite_user_id = player_id,
-			tournament_id = tournament_id
-		)
-		messages.success(request, f"Uninvited {uninvited_user.username}.")
-	except Exception as e:
-		messages.error(request, e.args[0])
-	return render_tournament_view(request, tournament_id)
-	
-
-"""
 Remove a player from a tournament.
 HTMX request for tournament_view
 """
@@ -247,26 +193,24 @@ def remove_player_from_tournament(request, *args, **kwargs):
 	return redirect(request.META['HTTP_REFERER'])
 
 """
-Invite a player to a tournament.
+Add a player directly to a tournament.
 HTMX request for tournament_view
 """
 @login_required
-def invite_player_to_tournament(request, *args, **kwargs):
+def add_player_to_tournament(request, *args, **kwargs):
 	try:
 		user = request.user
 		player_id = kwargs['player_id']
 		tournament_id = kwargs['tournament_id']
-		
-		# Verify the admin is sending the invite
+
 		verify_admin(
 			user = user,
 			tournament_id = tournament_id,
-			error_message = "Only the admin can invite players."
+			error_message = "Only the admin can add players."
 		)
 
-		invite = TournamentInvite.objects.send_invite(
-			sent_from_user_id = user.id,
-			send_to_user_id = player_id,
+		TournamentPlayer.objects.create_player_for_tournament(
+			user_id = player_id,
 			tournament_id = tournament_id
 		)
 		return render_tournament_view(request, tournament_id)
@@ -394,20 +338,13 @@ def render_tournament_view(request, tournament_id):
 	players = TournamentPlayer.objects.get_tournament_players(tournament.id)
 	context['players'] = players
 
-	# Get the pending invites
-	invites = TournamentInvite.objects.find_pending_invites_for_tournament(tournament.id)
-	context['invites'] = invites
-	
 	# Search for users with htmx
 	search = request.GET.get("search")
 	if search != None and search != "":
 		users = User.objects.all().filter(username__icontains=search)
-		# Exclude the admin,
+		# Exclude the admin
 		users = users.exclude(email__iexact=request.user.email)
-		# Exclude pending invites
-		for invite in invites:
-			users = users.exclude(email__iexact=invite.send_to.email)
-		# Exclude users who have already joined
+		# Exclude users who are already players
 		for player in players:
 			users = users.exclude(email__iexact=player.user.email)
 		context['users'] = users
@@ -469,12 +406,6 @@ def render_tournament_view(request, tournament_id):
 		context['eliminations_summary_data'] = eliminations_summary_data
 		context['eliminations_data'] = eliminations_data
 
-
-		# --- Add a "Warning" section if not all TournamentPlayers have joined the Tournament. ---
-		has_all_joined = Tournament.objects.have_all_players_joined_tournament(
-			tournament_id = tournament.id
-		)
-		context['have_all_players_joined_tournament'] = has_all_joined
 
 	# --- Build timeline ---
 	# Note: Only build a timeline if this is not a backfill tournament and the state is either ACTIVE or COMPLETED.
